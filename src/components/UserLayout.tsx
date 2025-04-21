@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { CheckSquare, Users, Menu, LogOut } from 'lucide-react';
+import { CheckSquare, Users, Menu, LogOut, Book, Search, LayoutDashboard } from 'lucide-react';
 
 interface UserLayoutProps {
   children: React.ReactNode;
 }
 
 const userNav = [
-  { name: 'Assigned Tasks', href: '/userdashboard', icon: CheckSquare },
+  { name: 'Assigned Tasks', href: '/userdashboard', icon: LayoutDashboard },
+  { name: 'Tasks', href: '/usertasks', icon: CheckSquare },
   { name: 'Contacts', href: '/contacts', icon: Users },
+  { name: 'Guidelines', href: '/guidelines', icon: Book },
+  { name: 'Search', href: '/search', icon: Search },
 ];
 
 export const UserLayout: React.FC<UserLayoutProps> = ({ children }) => {

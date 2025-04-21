@@ -10,7 +10,6 @@ import {
   deleteDoc,
 } from 'firebase/firestore';
 
-// Define proper TypeScript interfaces
 interface User {
   id: string;
   email: string;
@@ -43,15 +42,19 @@ interface Task {
   description: string;
   dueDate: string;
   frequency: 'daily' | 'weekly' | 'monthly' | 'date-wise' | '';
+  frequencySubdivision?: {
+    daily?: 'morning' | 'afternoon' | 'evening';
+    weekly?: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+    monthly?: 'beginning' | 'middle' | 'end';
+  };
   repeatDate?: string;
   assignedUserId: string;
   referenceContactId?: string;
   guidelineId?: string;
   createdAt?: string;
   updatedAt?: string;
-  createdByEmail: string;
   status: string;
-  priority?: 'low' | 'medium' | 'high';  // Added priority
+  priority?: 'low' | 'medium' | 'high';
 }
 
 interface TaskFormData {
@@ -60,12 +63,17 @@ interface TaskFormData {
   dueDate: string;
   dueTime: string;
   frequency: 'daily' | 'weekly' | 'monthly' | 'date-wise' | '';
+  frequencySubdivision: {
+    daily?: 'morning' | 'afternoon' | 'evening';
+    weekly?: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+    monthly?: 'beginning' | 'middle' | 'end';
+  };
   repeatDate?: string;
   assignedUserId: string;
   referenceContactId: string;
   guidelineId: string;
   status: string;
-  priority: 'low' | 'medium' | 'high' | '';  // Added priority
+  priority: 'low' | 'medium' | 'high' | '';
 }
 
 interface NewContactForm {
@@ -84,7 +92,7 @@ interface NewGuidelineForm {
   description: string;
 }
 
-export function Tasks() {
+export function AdminTasks() {
   const [users, setUsers] = useState<User[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [guidelines, setGuidelines] = useState<Guideline[]>([]);
@@ -101,6 +109,7 @@ export function Tasks() {
     dueDate: '',
     dueTime: '',
     frequency: '',
+    frequencySubdivision: {},
     repeatDate: '',
     assignedUserId: '',
     referenceContactId: '',
@@ -122,7 +131,6 @@ export function Tasks() {
     title: '',
     description: ''
   });
-  // Added filter and sort states
   const [filterDueDate, setFilterDueDate] = useState<string>('');
   const [filterAssignedUser, setFilterAssignedUser] = useState<string>('');
   const [filterFrequency, setFilterFrequency] = useState<string>('');
@@ -131,7 +139,6 @@ export function Tasks() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   const email = localStorage.getItem('userEmail');
-  const today = new Date().toISOString().split('T')[0];
 
   const getCurrentDate = (): string => new Date().toISOString().split('T')[0];
   const getCurrentTime = (): string => new Date().toTimeString().slice(0, 5);
@@ -160,48 +167,26 @@ export function Tasks() {
         setGuidelines(guidelineSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guideline)));
 
         const now = Date.now();
-        const baseTasks = taskSnap.docs
-          .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Task))
-          .filter(task => task.createdByEmail === email);
+        const validTasks: Task[] = [];
 
-        const recurringTasks: Task[] = [];
-        baseTasks.forEach(task => {
-          const taskDate = new Date(task.dueDate);
-          const todayDate = new Date(today);
-          todayDate.setHours(0, 0, 0, 0);
-          taskDate.setHours(0, 0, 0, 0);
+        await Promise.all(
+          taskSnap.docs.map(async docSnap => {
+            const taskData = docSnap.data() as Task;
+            const taskId = docSnap.id;
 
-          let isRecurring = false;
-          switch (task.frequency) {
-            case 'daily':
-              isRecurring = true;
-              break;
-            case 'weekly':
-              isRecurring = (todayDate.getTime() - taskDate.getTime()) % (7 * 24 * 60 * 60 * 1000) === 0;
-              break;
-            case 'monthly':
-              isRecurring = taskDate.getDate() === todayDate.getDate() && taskDate.getMonth() !== todayDate.getMonth();
-              break;
-            case 'date-wise':
-              if (task.repeatDate) {
-                const repeatDate = new Date(task.repeatDate).getTime();
-                isRecurring = todayDate.getTime() >= repeatDate;
-              }
-              break;
-            default:
-              isRecurring = false;
-          }
+            if (
+              taskData.status === 'completed' &&
+              taskData.updatedAt &&
+              now - new Date(taskData.updatedAt).getTime() > 30 * 24 * 60 * 60 * 1000
+            ) {
+              await deleteDoc(doc(db, 'tasks', taskId));
+            } else {
+              validTasks.push({ id: taskId, ...taskData });
+            }
+          })
+        );
 
-          if (isRecurring && task.status !== 'completed') {
-            const newTask: Task = { ...task, id: `${task.id}-${today}`, dueDate: today + 'T' + task.dueDate.split('T')[1] };
-            recurringTasks.push(newTask);
-          }
-          if (!(task.status === 'completed' && task.updatedAt && now - new Date(task.updatedAt).getTime() > 30 * 24 * 60 * 60 * 1000)) {
-            recurringTasks.push(task);
-          }
-        });
-
-        setTasks(recurringTasks);
+        setTasks(validTasks);
         setLoading(false);
       } catch (err) {
         setError('Failed to load data');
@@ -211,13 +196,21 @@ export function Tasks() {
     };
 
     fetchData();
-  }, [email, today]);
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => {
-      if (name === 'frequency' && value === 'date-wise') {
-        return { ...prev, [name]: value, repeatDate: prev.repeatDate || getCurrentDate() };
+      if (name === 'frequency') {
+        const newSubdivision = value === 'date-wise' ? { repeatDate: prev.repeatDate || getCurrentDate() } : {};
+        return { ...prev, [name]: value, frequencySubdivision: {} };
+      }
+      if (name.startsWith('frequencySubdivision')) {
+        const subType = name.split('.')[1];
+        return {
+          ...prev,
+          frequencySubdivision: { [subType]: value }
+        };
       }
       return { ...prev, [name]: value };
     });
@@ -244,12 +237,13 @@ export function Tasks() {
       dueDate: getCurrentDate(),
       dueTime: getCurrentTime(),
       frequency: '',
+      frequencySubdivision: {},
       repeatDate: '',
       assignedUserId: users[0]?.id || '',
       referenceContactId: '',
       guidelineId: '',
-      status: 'pending', // Default status for new tasks
-      priority: 'medium'  // Default priority
+      priority: 'medium',
+      status:'pending',
     });
     setNewContactForm({
       name: '',
@@ -275,12 +269,13 @@ export function Tasks() {
       dueDate: task.dueDate.split('T')[0],
       dueTime: task.dueDate.split('T')[1]?.slice(0, 5) || getCurrentTime(),
       frequency: task.frequency || '',
+      frequencySubdivision: task.frequencySubdivision || {},
       repeatDate: task.repeatDate || '',
       assignedUserId: task.assignedUserId,
       referenceContactId: task.referenceContactId || '',
       guidelineId: task.guidelineId || '',
       priority: task.priority || 'medium',
-      status: task.status || 'pending', // Set status from task or default to 'pending'
+      status: task.status || 'pending'
     });
   };
 
@@ -295,6 +290,7 @@ export function Tasks() {
       dueDate: '',
       dueTime: '',
       frequency: '',
+      frequencySubdivision: {},
       repeatDate: '',
       assignedUserId: '',
       referenceContactId: '',
@@ -383,7 +379,7 @@ export function Tasks() {
       if (isEditingTask) {
         await updateDoc(doc(db, 'tasks', isEditingTask), taskData);
         setTasks(prev =>
-            prev.map(task =>
+          prev.map(task =>
             task.id === isEditingTask ? { id: isEditingTask, ...taskData } : task
           )
         );
@@ -455,7 +451,6 @@ export function Tasks() {
     }
   };
 
-  // Filter and sort tasks
   const filteredAndSortedTasks = tasks
     .filter(task => {
       return (
@@ -482,7 +477,6 @@ export function Tasks() {
       }
     });
 
-  // Toggle sort direction
   const toggleSort = (field: string) => {
     if (sortField === field) {
       setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -490,6 +484,20 @@ export function Tasks() {
       setSortField(field);
       setSortDirection('asc');
     }
+  };
+
+  const getFrequencySubdivisionDisplay = (task: Task): string => {
+    if (!task.frequencySubdivision) return '';
+    if (task.frequency === 'daily' && task.frequencySubdivision.daily) {
+      return ` (${task.frequencySubdivision.daily})`;
+    }
+    if (task.frequency === 'weekly' && task.frequencySubdivision.weekly) {
+      return ` (${task.frequencySubdivision.weekly})`;
+    }
+    if (task.frequency === 'monthly' && task.frequencySubdivision.monthly) {
+      return ` (${task.frequencySubdivision.monthly})`;
+    }
+    return '';
   };
 
   return (
@@ -663,6 +671,58 @@ export function Tasks() {
                   <option value="date-wise">Date-wise</option>
                 </select>
               </div>
+              {formData.frequency === 'daily' && (
+                <div>
+                  <label className="block text-sm sm:text-base md:text-lg text-gray-700">Daily Schedule</label>
+                  <select
+                    name="frequencySubdivision.daily"
+                    value={formData.frequencySubdivision.daily || ''}
+                    onChange={handleInputChange}
+                    className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
+                  >
+                    <option value="">Select time</option>
+                    <option value="morning">Morning</option>
+                    <option value="afternoon">Afternoon</option>
+                    <option value="evening">Evening</option>
+                  </select>
+                </div>
+              )}
+              {formData.frequency === 'weekly' && (
+                <div>
+                  <label className="block text-sm sm:text-base md:text-lg text-gray-700">Weekly Day</label>
+                  <select
+                    name="frequencySubdivision.weekly"
+                    value={formData.frequencySubdivision.weekly || ''}
+                    onChange={handleInputChange}
+                    className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
+                  >
+                    <option value="">Select day</option>
+                    <option value="monday">Monday</option>
+                    <option value="tuesday">Tuesday</option>
+                    <option value="wednesday">Wednesday</option>
+                    <option value="thursday">Thursday</option>
+                    <option value="friday">Friday</option>
+                    <option value="saturday">Saturday</option>
+                    <option value="sunday">Sunday</option>
+                  </select>
+                </div>
+              )}
+              {formData.frequency === 'monthly' && (
+                <div>
+                  <label className="block text-sm sm:text-base md:text-lg text-gray-700">Monthly Period</label>
+                  <select
+                    name="frequencySubdivision.monthly"
+                    value={formData.frequencySubdivision.monthly || ''}
+                    onChange={handleInputChange}
+                    className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
+                  >
+                    <option value="">Select period</option>
+                    <option value="beginning">Beginning</option>
+                    <option value="middle">Middle</option>
+                    <option value="end">End</option>
+                  </select>
+                </div>
+              )}
               {formData.frequency === 'date-wise' && (
                 <div>
                   <label className="block text-sm sm:text-base md:text-lg text-gray-700">Repeat Date</label>
@@ -903,7 +963,7 @@ export function Tasks() {
         </div>
       ) : filteredAndSortedTasks.length === 0 ? (
         <div className="text-center py-4 text-gray-500">
-          <p>No tasks match the current filters. Click "Add a task" to get started.</p>
+          <p>No tasks match the current filters.</p>
         </div>
       ) : (
         <ul className="space-y-4">
@@ -928,11 +988,12 @@ export function Tasks() {
                     </span>
                     {task.frequency && (
                       <span className="text-gray-600">
-                        Frequency: {task.frequency}{task.frequency === 'date-wise' && task.repeatDate ? ` (Repeat: ${task.repeatDate})` : ''}
+                        Frequency: {task.frequency}{getFrequencySubdivisionDisplay(task)}
+                        {task.frequency === 'date-wise' && task.repeatDate ? ` (Repeat: ${task.repeatDate})` : ''}
                       </span>
                     )}
                     <span className="text-gray-600">
-                      Assigned: {getUserName(task.assignedUserId)}
+                      Assigned:  {getUserName(task.assignedUserId)}
                       {getUserPhone(task.assignedUserId) && (
                         <div className="inline-flex ml-1 gap-1">
                           <a href={`tel:${getUserPhone(task.assignedUserId)}`} className="text-blue-600 hover:text-blue-800">
@@ -1000,4 +1061,4 @@ export function Tasks() {
   );
 }
 
-export default Tasks;
+export default AdminTasks;

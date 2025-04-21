@@ -9,6 +9,8 @@ import {
   PlusSquareIcon,
   Menu,
   LogOut,
+  Book,
+  Search
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase'; // adjust path
@@ -26,9 +28,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Dashboard', href: '/admindashboard', icon: LayoutDashboard },
     { name: 'Tasks', href: '/tasks', icon: CheckSquare },
     { name: 'Contacts', href: '/admincontacts', icon: Users },
+    { name: 'Search', href: '/adminsearch', icon: Search },
     { name: 'Templates', href: '/templates', icon: FileText },
     { name: 'Time Log', href: '/time-log', icon: Clock },
     { name: 'Add Users', href: '/adduser', icon: PlusSquareIcon },
+    { name: 'Guidelines', href: '/adminguidelines', icon: Book },
   ];
 
   const handleLogout = async () => {

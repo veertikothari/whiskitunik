@@ -16,6 +16,7 @@ interface TaskType {
   assignedUserId: string;
   referenceContactId: string;
   status: string;
+  guidelineId?: string; // Added to support guidelines
 }
 
 interface ProjectTemplate {
@@ -24,68 +25,42 @@ interface ProjectTemplate {
   description: string;
   tasks: TaskType[];
   templateDueDate: string;
+  parentTemplateName?: string; // Added to store parent template name
+}
+
+interface Guideline {
+  id: string;
+  title: string;
+  description: string;
 }
 
 export function Templates() {
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
-
+  const [guidelines, setGuidelines] = useState<Guideline[]>([]); // State for guidelines
   const [newTemplate, setNewTemplate] = useState<Omit<ProjectTemplate, 'id'>>({
     name: '',
     description: '',
     tasks: [],
-    templateDueDate: new Date().toISOString().split('T')[0]
+    templateDueDate: new Date().toISOString().split('T')[0],
+    parentTemplateName: '' // Added to initialize parent template name
   });
-
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [useTemplateId, setUseTemplateId] = useState<string | null>(null); // Track which template is being used
+  const [parentTemplateName, setParentTemplateName] = useState<string>(''); // State for parent template name input
 
   const getToday = () => new Date().toISOString().split('T')[0];
 
   useEffect(() => {
     fetchTemplates();
     fetchUsersAndContacts();
-  }, []);
-  
-  useEffect(() => {
-    templates.forEach(template => {
-      autoActivateTemplateTasks(template);
-    });
-  }, [templates]);
-  
-  const autoActivateTemplateTasks = async (template: ProjectTemplate) => {
-    const today = new Date();
-    const dueDate = new Date(template.templateDueDate);
-  
-    const timeDiff = dueDate.getTime() - today.getTime();
-    const daysLeft = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-    console.log(daysLeft);
-    if (daysLeft <= 5) {
-      const existingTasksSnap = await getDocs(collection(db, 'tasks'));
-      const alreadyActivated = existingTasksSnap.docs.some(doc => {
-        const data = doc.data();
-        return (
-          data.createdFromTemplateId === template.id &&
-          data.dueDate === template.templateDueDate
-        );
-      });
-  
-      if (!alreadyActivated) {
-        const taskRef = collection(db, 'tasks');
-        for (const task of template.tasks) {
-          await addDoc(taskRef, {
-            ...task,
-            dueDate: template.templateDueDate,
-            createdFromTemplateId: template.id,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          });
-        }
-        console.log(`Activated tasks for template "${template.name}"`);
-      }
-    }
-  };
-  
+    fetchGuidelines(); // Fetch guidelines
+    const userNames = users.map(user => user.name);
+    console.log(userNames); // Logs: ['Nikesh Gala', 'Urvi Gala', 'Veerti Kothari']
+}, [users]
+);
+
   const fetchTemplates = async () => {
     const snapshot = await getDocs(collection(db, 'projectTemplates'));
     const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as ProjectTemplate[];
@@ -99,6 +74,11 @@ export function Templates() {
     setContacts(contactsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
   };
 
+  const fetchGuidelines = async () => {
+    const guidelinesSnap = await getDocs(collection(db, 'guidelines'));
+    setGuidelines(guidelinesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guideline)));
+  };
+
   const handleAddTask = () => {
     setNewTemplate(prev => ({
       ...prev,
@@ -109,7 +89,8 @@ export function Templates() {
           description: '',
           assignedUserId: '',
           referenceContactId: '',
-          status: 'pending'
+          status: 'pending',
+          guidelineId: '' // Initialize with empty guidelineId
         }
       ]
     }));
@@ -133,33 +114,42 @@ export function Templates() {
     await addDoc(templateRef, newTemplate);
     await fetchTemplates();
 
-    setNewTemplate({ name: '', description: '', tasks: [], templateDueDate: getToday() });
+    setNewTemplate({ name: '', description: '', tasks: [], templateDueDate: getToday(), parentTemplateName: '' });
     (document.getElementById('createTemplateModal') as HTMLDialogElement).close();
   };
 
   const handleUseTemplate = async (template: ProjectTemplate) => {
-    const fiveDaysFromNow = new Date();
-    fiveDaysFromNow.setDate(fiveDaysFromNow.getDate() + 5);
+    setUseTemplateId(template.id); // Set the template being used
+    (document.getElementById('useTemplateModal') as HTMLDialogElement).showModal();
+  };
 
-    const templateDue = new Date(template.templateDueDate);
-    if (
-      templateDue.getFullYear() === fiveDaysFromNow.getFullYear() &&
-      templateDue.getMonth() === fiveDaysFromNow.getMonth() &&
-      templateDue.getDate() === fiveDaysFromNow.getDate()
-    ) {
-      const taskRef = collection(db, 'tasks');
-      for (const task of template.tasks) {
-        await addDoc(taskRef, {
-          ...task,
-          dueDate: template.templateDueDate,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
-      }
-      alert('Tasks activated successfully');
-    } else {
-      alert('Tasks will activate only when due date is 5 days away.');
+  const handleConfirmUseTemplate = async () => {
+    if (!useTemplateId || !parentTemplateName) return;
+
+    const template = templates.find(t => t.id === useTemplateId);
+    if (!template) return;
+
+    const useDate = new Date(); // Date when "Use" is clicked
+    const dueDate = new Date(useDate);
+    dueDate.setDate(useDate.getDate() + 10); // Set due date 10 days ahead
+    const dueDateStr = dueDate.toISOString().split('T')[0];
+
+    const taskRef = collection(db, 'tasks');
+    for (const task of template.tasks) {
+      await addDoc(taskRef, {
+        ...task,
+        title: parentTemplateName ? `${parentTemplateName}: ${task.title}` : task.title, // Prepend parent name
+        dueDate: dueDateStr,
+        guidelineId: task.guidelineId, // Include guidelineId
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
     }
+    alert('Tasks activated successfully with due date set to 10 days from today');
+
+    setUseTemplateId(null);
+    setParentTemplateName('');
+    (document.getElementById('useTemplateModal') as HTMLDialogElement).close();
   };
 
   const handleDeleteTemplate = async (templateId: string) => {
@@ -172,7 +162,8 @@ export function Templates() {
       name: template.name,
       description: template.description,
       tasks: template.tasks,
-      templateDueDate: template.templateDueDate
+      templateDueDate: template.templateDueDate,
+      parentTemplateName: template.parentTemplateName || '' // Include parent template name
     });
     setEditingTemplateId(template.id);
     (document.getElementById('createTemplateModal') as HTMLDialogElement).showModal();
@@ -185,7 +176,7 @@ export function Templates() {
     const ref = doc(db, 'projectTemplates', editingTemplateId);
     await updateDoc(ref, newTemplate);
     setEditingTemplateId(null);
-    setNewTemplate({ name: '', description: '', tasks: [], templateDueDate: getToday() });
+    setNewTemplate({ name: '', description: '', tasks: [], templateDueDate: getToday(), parentTemplateName: '' });
     await fetchTemplates();
     (document.getElementById('createTemplateModal') as HTMLDialogElement).close();
   };
@@ -232,6 +223,9 @@ export function Templates() {
           </div>
           <p className="text-gray-600">{template.description}</p>
           <p className="text-sm text-gray-500 mb-2">Due Date: {template.templateDueDate}</p>
+          {template.parentTemplateName && (
+            <p className="text-sm text-gray-500">Parent Template: {template.parentTemplateName}</p>
+          )}
           <div className="mt-4">
             <h4 className="font-medium mb-2">Tasks:</h4>
             <ul className="pl-4 list-disc space-y-1 text-sm text-gray-700">
@@ -271,6 +265,13 @@ export function Templates() {
             onChange={e => setNewTemplate({ ...newTemplate, templateDueDate: e.target.value })}
             required
           />
+          <input
+            type="text"
+            placeholder="Parent Template Name"
+            className="w-full border px-3 py-2 mb-3 rounded"
+            value={newTemplate.parentTemplateName || ''}
+            onChange={e => setNewTemplate({ ...newTemplate, parentTemplateName: e.target.value })}
+          />
           <div className="mb-3">
             <div className="flex justify-between items-center mb-2">
               <span className="font-medium">Tasks</span>
@@ -304,7 +305,7 @@ export function Templates() {
                   <option value="">Assign to...</option>
                   {users.map(user => (
                     <option key={user.id} value={user.id}>
-                      {user.email}
+                      {user.name}
                     </option>
                   ))}
                 </select>
@@ -321,6 +322,18 @@ export function Templates() {
                     </option>
                   ))}
                 </select>
+                <select
+                  className="w-full border px-2 py-1 rounded"
+                  value={task.guidelineId || ''}
+                  onChange={e => handleTaskChange(i, 'guidelineId', e.target.value)}
+                >
+                  <option value="">Select guideline...</option>
+                  {guidelines.map(guideline => (
+                    <option key={guideline.id} value={guideline.id}>
+                      {guideline.title}
+                    </option>
+                  ))}
+                </select>
               </div>
             ))}
           </div>
@@ -333,6 +346,29 @@ export function Templates() {
             <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded">
               {editingTemplateId ? 'Update' : 'Create'}
             </button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="useTemplateModal" className="modal bg-white rounded shadow p-6 w-full max-w-md">
+        <form onSubmit={(e) => { e.preventDefault(); handleConfirmUseTemplate(); }}>
+          <h2 className="text-xl font-bold mb-4">Use Template</h2>
+          <label className="block mb-2">Parent Template Name</label>
+          <input
+            type="text"
+            placeholder="Enter Parent Template Name"
+            className="w-full border px-3 py-2 mb-3 rounded"
+            value={parentTemplateName}
+            onChange={(e) => setParentTemplateName(e.target.value)}
+            required
+          />
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => {
+              setUseTemplateId(null);
+              setParentTemplateName('');
+              (document.getElementById('useTemplateModal') as HTMLDialogElement).close();
+            }} className="px-4 py-2 border rounded">Cancel</button>
+            <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded">Confirm</button>
           </div>
         </form>
       </dialog>

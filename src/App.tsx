@@ -4,13 +4,20 @@ import { UserLayout } from './components/UserLayout';  // User Sidebar Layout
 
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/AdminDashboard';         // Admin Dashboard
-import { Tasks } from './pages/Tasks';
+import { AdminTasks } from './pages/AdminTasks';
 import { Contacts } from './pages/Contacts';
 import { Templates } from './pages/Templates';
 import { TimeLog } from './pages/TimeLog';
 import { UserDashboard } from './pages/UserDashboard'; // User Dashboard
 import { AdminContacts } from './pages/AdminContacts';
 import { AdminUsers } from './pages/AdminUsers';
+import { Guidelines } from './pages/Guidelines';
+import { AdminSearchScreen } from './pages/AdminSearchScreen';
+import { SearchScreen } from './pages/SearchScreen';
+import { Tasks } from './pages/Tasks';
+
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 function App() {
   return (
@@ -32,7 +39,7 @@ function App() {
           path="/tasks"
           element={
             <Layout>
-              <Tasks />
+              <AdminTasks />
             </Layout>
           }
         />
@@ -45,10 +52,26 @@ function App() {
           }
         />
         <Route
+          path="/adminsearch"
+          element={
+            <Layout>
+              <AdminSearchScreen />
+            </Layout>
+          }
+        />
+        <Route
           path="/templates"
           element={
             <Layout>
               <Templates />
+            </Layout>
+          }
+        />
+        <Route
+          path="/adminguidelines"
+          element={
+            <Layout>
+              <Guidelines />
             </Layout>
           }
         />
@@ -79,6 +102,22 @@ function App() {
           }
         />
         <Route
+          path="/search"
+          element={
+            <UserLayout>
+              <SearchScreen />
+            </UserLayout>
+          }
+        />
+        <Route
+          path="/usertasks"
+          element={
+            <UserLayout>
+              <Tasks />
+            </UserLayout>
+          }
+        />
+        <Route
           path="/contacts"
           element={
             <UserLayout>
@@ -86,7 +125,16 @@ function App() {
             </UserLayout>
           }
         />
+        <Route
+          path="/guidelines"
+          element={
+            <UserLayout>
+              <Guidelines />
+            </UserLayout>
+          }
+        />
       </Routes>
+      <ToastContainer />
     </Router>
   );
 }

@@ -23,8 +23,14 @@ interface Task {
   timeLogs?: TimeLogEntry[];
 }
 
+interface User {
+  id: string;
+  name: string;
+}
+
 interface UserEfficiency {
   userId: string;
+  name: string; // Added to store user name
   totalHours: number;
   taskCount: number;
   avgHoursPerTask: number;
@@ -32,10 +38,16 @@ interface UserEfficiency {
 
 export function TimeLog() {
   const [efficiencyData, setEfficiencyData] = useState<UserEfficiency[]>([]);
+  const [users, setUsers] = useState<User[]>([]); // State to store user data
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchEfficiencyData = async () => {
+      // Fetch users to map IDs to names
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const usersList = usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
+      setUsers(usersList);
+
       const taskSnap = await getDocs(collection(db, 'tasks'));
 
       const efficiencyMap: { [userId: string]: { totalHours: number; taskCount: number } } = {};
@@ -60,12 +72,16 @@ export function TimeLog() {
         });
       });
 
-      const result: UserEfficiency[] = Object.entries(efficiencyMap).map(([userId, data]) => ({
-        userId,
-        totalHours: parseFloat(data.totalHours.toFixed(2)),
-        taskCount: data.taskCount,
-        avgHoursPerTask: data.taskCount > 0 ? parseFloat((data.totalHours / data.taskCount).toFixed(2)) : 0,
-      }));
+      const result: UserEfficiency[] = Object.entries(efficiencyMap).map(([userId, data]) => {
+        const user = usersList.find(u => u.id === userId);
+        return {
+          userId,
+          name: user ? user.name : userId, // Use name if found, otherwise fallback to userId
+          totalHours: parseFloat(data.totalHours.toFixed(2)),
+          taskCount: data.taskCount,
+          avgHoursPerTask: data.taskCount > 0 ? parseFloat((data.totalHours / data.taskCount).toFixed(2)) : 0,
+        };
+      });
 
       setEfficiencyData(result);
       setLoading(false);
@@ -90,7 +106,7 @@ export function TimeLog() {
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={efficiencyData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="userId" />
+                <XAxis dataKey="name" /> {/* Changed from userId to name */}
                 <YAxis />
                 <Tooltip />
                 <Legend />
@@ -105,7 +121,7 @@ export function TimeLog() {
             <table className="w-full table-auto border-collapse">
               <thead>
                 <tr className="bg-gray-100 text-left">
-                  <th className="p-3 border">User ID</th>
+                  <th className="p-3 border">User Name</th> {/* Changed from User ID */}
                   <th className="p-3 border">Total Hours</th>
                   <th className="p-3 border">Tasks Involved</th>
                   <th className="p-3 border">Avg Hours / Task</th>
@@ -114,7 +130,7 @@ export function TimeLog() {
               <tbody>
                 {efficiencyData.map(user => (
                   <tr key={user.userId} className="hover:bg-gray-50">
-                    <td className="p-3 border">{user.userId}</td>
+                    <td className="p-3 border">{user.name}</td> {/* Changed from userId to name */}
                     <td className="p-3 border">{user.totalHours}</td>
                     <td className="p-3 border">{user.taskCount}</td>
                     <td className="p-3 border">{user.avgHoursPerTask}</td>

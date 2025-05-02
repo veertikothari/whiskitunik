@@ -6,9 +6,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
-  doc,
-  query,
-  where
+  doc
 } from 'firebase/firestore';
 import { Plus, Copy, Edit, Trash2 } from 'lucide-react';
 
@@ -18,8 +16,7 @@ interface TaskType {
   assignedUserId?: string;
   referenceContactId?: string;
   status?: string;
-  guidelineId?: string;
-  links?: string; // Added field
+  guidelineId?: string; // Added to support guidelines
 }
 
 interface ProjectTemplate {
@@ -28,8 +25,7 @@ interface ProjectTemplate {
   description: string;
   tasks?: TaskType[];
   templateDueDate: string;
-  parentTemplateName?: string;
-  createdByEmail?: string; // Added to store creator's email
+  parentTemplateName?: string; // Added to store parent template name
 }
 
 interface Guideline {
@@ -42,35 +38,31 @@ export function Templates() {
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
-  const [guidelines, setGuidelines] = useState<Guideline[]>([]);
+  const [guidelines, setGuidelines] = useState<Guideline[]>([]); // State for guidelines
   const [newTemplate, setNewTemplate] = useState<Omit<ProjectTemplate, 'id'>>({
     name: '',
     description: '',
     tasks: [],
     templateDueDate: new Date().toISOString().split('T')[0],
-    parentTemplateName: ''
+    parentTemplateName: '' // Added to initialize parent template name
   });
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
-  const [useTemplateId, setUseTemplateId] = useState<string | null>(null);
-  const [parentTemplateName, setParentTemplateName] = useState<string>('');
+  const [useTemplateId, setUseTemplateId] = useState<string | null>(null); // Track which template is being used
+  const [parentTemplateName, setParentTemplateName] = useState<string>(''); // State for parent template name input
   const [isTasksOpen, setIsTasksOpen] = useState<boolean>(false);
   const getToday = () => new Date().toISOString().split('T')[0];
 
   useEffect(() => {
     fetchTemplates();
     fetchUsersAndContacts();
-    fetchGuidelines();
+    fetchGuidelines(); // Fetch guidelines
     const userNames = users.map(user => user.name);
-    console.log(userNames);
-  }, [users]);
+    console.log(userNames); // Logs: ['Nikesh Gala', 'Urvi Gala', 'Veerti Kothari']
+}, [users]
+);
 
   const fetchTemplates = async () => {
-    const userEmail = localStorage.getItem('userEmail') || '';
-    const templatesQuery = query(
-      collection(db, 'projectTemplates'),
-      where('createdByEmail', '==', userEmail)
-    );
-    const snapshot = await getDocs(templatesQuery);
+    const snapshot = await getDocs(collection(db, 'projectTemplates'));
     const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as ProjectTemplate[];
     setTemplates(list);
   };
@@ -86,6 +78,7 @@ export function Templates() {
     const guidelinesSnap = await getDocs(collection(db, 'guidelines'));
     setGuidelines(guidelinesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guideline)));
   };
+    
 
   const handleAddTask = () => {
     setNewTemplate(prev => ({
@@ -98,12 +91,12 @@ export function Templates() {
           assignedUserId: '',
           referenceContactId: '',
           status: 'pending',
-          guidelineId: '',
-          links: '' // Initialize links
+          guidelineId: '' // Initialize with empty guidelineId
         }
       ]
     }));
-  };
+  }
+
 
   const handleTaskChange = (
     index: number,
@@ -120,10 +113,7 @@ export function Templates() {
     if (!newTemplate.name || !newTemplate.description) return;
 
     const templateRef = collection(db, 'projectTemplates');
-    await addDoc(templateRef, {
-      ...newTemplate,
-      createdByEmail: localStorage.getItem('userEmail') || ''
-    });
+    await addDoc(templateRef, newTemplate);
     await fetchTemplates();
 
     setNewTemplate({ name: '', description: '', tasks: [], templateDueDate: getToday(), parentTemplateName: '' });
@@ -131,7 +121,7 @@ export function Templates() {
   };
 
   const handleUseTemplate = async (template: ProjectTemplate) => {
-    setUseTemplateId(template.id);
+    setUseTemplateId(template.id); // Set the template being used
     (document.getElementById('useTemplateModal') as HTMLDialogElement).showModal();
   };
 
@@ -141,22 +131,20 @@ export function Templates() {
     const template = templates.find(t => t.id === useTemplateId);
     if (!template) return;
 
-    const useDate = new Date();
+    const useDate = new Date(); // Date when "Use" is clicked
     const dueDate = new Date(useDate);
-    dueDate.setDate(useDate.getDate() + 10);
+    dueDate.setDate(useDate.getDate() + 10); // Set due date 10 days ahead
     const dueDateStr = dueDate.toISOString().split('T')[0];
 
     const taskRef = collection(db, 'tasks');
     for (const task of template.tasks) {
       await addDoc(taskRef, {
         ...task,
-        title: parentTemplateName ? `${parentTemplateName}: ${task.title}` : task.title,
+        title: parentTemplateName ? `${parentTemplateName}: ${task.title}` : task.title, // Prepend parent name
         dueDate: dueDateStr,
-        guidelineId: task.guidelineId,
-        links: task.links || '',
+        guidelineId: task.guidelineId, // Include guidelineId
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        createdByEmail: localStorage.getItem('userEmail') || ''
+        updatedAt: new Date().toISOString()
       });
     }
     alert('Tasks activated successfully with due date set to 10 days from today');
@@ -177,7 +165,7 @@ export function Templates() {
       description: template.description,
       tasks: template.tasks,
       templateDueDate: template.templateDueDate,
-      parentTemplateName: template.parentTemplateName || ''
+      parentTemplateName: template.parentTemplateName || '' // Include parent template name
     });
     setEditingTemplateId(template.id);
     (document.getElementById('createTemplateModal') as HTMLDialogElement).showModal();
@@ -188,10 +176,7 @@ export function Templates() {
     if (!editingTemplateId) return;
 
     const ref = doc(db, 'projectTemplates', editingTemplateId);
-    await updateDoc(ref, {
-      ...newTemplate,
-      createdByEmail: localStorage.getItem('userEmail') || ''
-    });
+    await updateDoc(ref, newTemplate);
     setEditingTemplateId(null);
     setNewTemplate({ name: '', description: '', tasks: [], templateDueDate: getToday(), parentTemplateName: '' });
     await fetchTemplates();
@@ -249,19 +234,6 @@ export function Templates() {
               {template.tasks.map((task, i) => (
                 <li key={i}>
                   {task.title} — {task.description}
-                  {task.links && (
-                    <span>
-                      {' — '}
-                      <a
-                        href={task.links.startsWith('http://') || task.links.startsWith('https://') ? task.links : `https://${task.links}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline"
-                      >
-                        {task.links}
-                      </a>
-                    </span>
-                  )}
                 </li>
               ))}
             </ul>
@@ -322,24 +294,20 @@ export function Templates() {
                   placeholder="Task Title"
                   value={task.title}
                   onChange={e => handleTaskChange(i, 'title', e.target.value)}
+                  
                 />
                 <textarea
                   className="w-full border px-2 py-1 rounded"
                   placeholder="Task Description + References"
                   value={task.description}
                   onChange={e => handleTaskChange(i, 'description', e.target.value)}
-                />
-                <input
-                  type="url"
-                  className="w-full border px-2 py-1 rounded"
-                  placeholder="Task Link (e.g., https://example.com)"
-                  value={task.links || ''}
-                  onChange={e => handleTaskChange(i, 'links', e.target.value)}
+                  
                 />
                 <select
                   className="w-full border px-2 py-1 rounded"
                   value={task.assignedUserId}
                   onChange={e => handleTaskChange(i, 'assignedUserId', e.target.value)}
+                  
                 >
                   <option value="">Assign to...</option>
                   {users.map(user => (
@@ -352,6 +320,7 @@ export function Templates() {
                   className="w-full border px-2 py-1 rounded"
                   value={task.referenceContactId}
                   onChange={e => handleTaskChange(i, 'referenceContactId', e.target.value)}
+                  
                 >
                   <option value="">Reference contact...</option>
                   {contacts.map(c => (
@@ -377,16 +346,10 @@ export function Templates() {
           </div>
 
           <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setEditingTemplateId(null);
-                (document.getElementById('createTemplateModal') as HTMLDialogElement).close();
-              }}
-              className="px-4 py-2 border rounded"
-            >
-              Cancel
-            </button>
+            <button type="button" onClick={() => {
+              setEditingTemplateId(null);
+              (document.getElementById('createTemplateModal') as HTMLDialogElement).close();
+            }} className="px-4 py-2 border rounded">Cancel</button>
             <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded">
               {editingTemplateId ? 'Update' : 'Create'}
             </button>
@@ -395,12 +358,7 @@ export function Templates() {
       </dialog>
 
       <dialog id="useTemplateModal" className="modal bg-white rounded shadow p-6 w-full max-w-md">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleConfirmUseTemplate();
-          }}
-        >
+        <form onSubmit={(e) => { e.preventDefault(); handleConfirmUseTemplate(); }}>
           <h2 className="text-xl font-bold mb-4">Use Template</h2>
           <label className="block mb-2">Parent Template Name</label>
           <input
@@ -412,20 +370,12 @@ export function Templates() {
             required
           />
           <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setUseTemplateId(null);
-                setParentTemplateName('');
-                (document.getElementById('useTemplateModal') as HTMLDialogElement).close();
-              }}
-              className="px-4 py-2 border rounded"
-            >
-              Cancel
-            </button>
-            <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded">
-              Confirm
-            </button>
+            <button type="button" onClick={() => {
+              setUseTemplateId(null);
+              setParentTemplateName('');
+              (document.getElementById('useTemplateModal') as HTMLDialogElement).close();
+            }} className="px-4 py-2 border rounded">Cancel</button>
+            <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded">Confirm</button>
           </div>
         </form>
       </dialog>

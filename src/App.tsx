@@ -6,6 +6,7 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/AdminDashboard';         // Admin Dashboard
 import { AdminTasks } from './pages/AdminTasks';
 import { Contacts } from './pages/Contacts';
+import { AdminTemplates } from './pages/AdminTemplates';
 import { Templates } from './pages/Templates';
 import { TimeLog } from './pages/TimeLog';
 import { UserDashboard } from './pages/UserDashboard'; // User Dashboard
@@ -60,7 +61,7 @@ function App() {
           }
         />
         <Route
-          path="/templates"
+          path="/admintemplates"
           element={
             <Layout>
               <Templates />
@@ -114,6 +115,14 @@ function App() {
           element={
             <UserLayout>
               <Tasks />
+            </UserLayout>
+          }
+        />
+        <Route
+          path="/templates"
+          element={
+            <UserLayout>
+              <Templates />
             </UserLayout>
           }
         />

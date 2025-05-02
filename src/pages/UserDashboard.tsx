@@ -11,13 +11,13 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Phone, MessageSquareText } from 'lucide-react';
-import Chart from 'chart.js/auto';
 
 // Define TypeScript interfaces
 interface User {
   id: string;
   email: string;
   phone: string;
+  name?: string;
   [key: string]: any;
 }
 
@@ -42,7 +42,7 @@ interface Guideline {
 
 interface TimeLog {
   date: string;
-  hours: number;
+  minutes: number;
   userId?: string;
 }
 
@@ -60,10 +60,12 @@ interface Task {
   updatedAt?: string;
   status?: 'pending' | 'in_progress' | 'completed' | 'overdue';
   timeLogs?: TimeLog[];
+  links?:string;
 }
 
 export const UserDashboard = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [filteredTasks, setFilteredTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [timeInputs, setTimeInputs] = useState<{ [taskId: string]: string }>({});
@@ -71,13 +73,14 @@ export const UserDashboard = () => {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [guidelines, setGuidelines] = useState<Guideline[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
-  const [chartInstance, setChartInstance] = useState<Chart | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<string>('dueDate');
 
   const navigate = useNavigate();
   const email = localStorage.getItem('userEmail');
   const name = localStorage.getItem('name');
 
-  const today = new Date('2025-04-21').toISOString().split('T')[0];
+  const today = new Date().toISOString().split('T')[0];
 
   const formatDateTime = (date: string, time: string): string => {
     return new Date(`${date}T${time}`).toLocaleString(undefined, {
@@ -115,7 +118,7 @@ export const UserDashboard = () => {
   };
 
   const getDueStatus = (dueDate: string): string => {
-    const today = new Date('2025-04-21');
+    const today = new Date();
     today.setHours(0, 0, 0, 0);
     const taskDate = new Date(dueDate);
     const diffTime = taskDate.getTime() - today.getTime();
@@ -158,9 +161,8 @@ export const UserDashboard = () => {
         const tasksQuery = query(tasksRef, where('assignedUserId', '==', currentUserId));
         const tasksSnap = await getDocs(tasksQuery);
 
-        const now = Date.now();
         const baseTasks = tasksSnap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as Task));
-        const recurringTasks: Task[] = [];
+        const allTasks: Task[] = [];
 
         baseTasks.forEach((task) => {
           const taskDate = new Date(task.dueDate);
@@ -177,7 +179,7 @@ export const UserDashboard = () => {
               isRecurring = (todayDate.getTime() - taskDate.getTime()) % (7 * 24 * 60 * 60 * 1000) === 0;
               break;
             case 'monthly':
-              isRecurring = taskDate.getDate() === todayDate.getDate() && taskDate.getMonth() !== todayDate.getMonth();
+              isRecurring = taskDate.getDate() === todayDate.getDate();
               break;
             case 'date-wise':
               if (task.repeatDate) {
@@ -192,16 +194,23 @@ export const UserDashboard = () => {
           const isOverdue = task.dueDate && task.dueDate < today && task.status !== 'completed';
           const status = isOverdue ? 'overdue' : task.status || 'pending';
 
+          // Add the original task with updated status
+          allTasks.push({ ...task, status });
+
+          // Add recurring instances if applicable
           if (isRecurring && task.status !== 'completed') {
-            const newTask: Task = { ...task, id: `${task.id}-${today}`, dueDate: today + 'T' + task.dueDate.split('T')[1], status };
-            recurringTasks.push(newTask);
-          }
-          if (!(task.status === 'completed' && task.updatedAt && now - new Date(task.updatedAt).getTime() > 30 * 24 * 60 * 60 * 1000)) {
-            recurringTasks.push({ ...task, status });
+            const newTask: Task = { 
+              ...task, 
+              id: `${task.id}-${today}`, 
+              dueDate: today + 'T' + (task.dueDate.split('T')[1] || '00:00'),
+              status 
+            };
+            allTasks.push(newTask);
           }
         });
 
-        setTasks(recurringTasks);
+        setTasks(allTasks);
+        setFilteredTasks(allTasks);
         setError('');
       } catch (err) {
         console.error('Error fetching tasks:', err);
@@ -215,66 +224,54 @@ export const UserDashboard = () => {
   }, [email, navigate, today]);
 
   useEffect(() => {
-    if (tasks.length > 0 && !chartInstance) {
-      const ctx = document.getElementById('taskChart') as HTMLCanvasElement;
-      const pending = tasks.filter((t) => t.status === 'pending').length;
-      const inProgress = tasks.filter((t) => t.status === 'in_progress').length;
-      const overdue = tasks.filter((t) => t.status === 'overdue').length;
-      const completed = tasks.filter((t) => t.status === 'completed').length;
+    // Filter and sort tasks
+    let updatedTasks = [...tasks];
 
-      const newChart = new Chart(ctx, {
-        type: 'pie',
-        data: {
-          labels: ['Pending', 'In Progress', 'Overdue', 'Completed'],
-          datasets: [{
-            data: [pending, inProgress, overdue, completed],
-            backgroundColor: ['#f1f7b5', '#9ea1d4', '#fd8a81', '#a8d1d1'],
-            borderWidth: 1,
-          }],
-        },
-        options: {
-          responsive: true,
-          plugins: {
-            legend: { position: 'top' },
-            title: { display: true, text: 'Task Status Distribution' },
-          },
-          onClick: (_, elements) => {
-            if (elements.length > 0) {
-              const index = elements[0].index;
-              const sectionIds = ['pending', 'in_progress', 'overdue', 'completed'];
-              const section = document.getElementById(`${sectionIds[index]}-section`);
-              if (section) section.scrollIntoView({ behavior: 'smooth' });
-            }
-          },
-        },
-      });
-      setChartInstance(newChart);
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      updatedTasks = updatedTasks.filter(task => task.status === statusFilter);
     }
-    return () => {
-      if (chartInstance) chartInstance.destroy();
-    };
-  }, [tasks, chartInstance]);
+
+    // Apply sorting
+    updatedTasks.sort((a, b) => {
+      if (sortBy === 'dueDate') {
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      } else if (sortBy === 'title') {
+        return a.title.localeCompare(b.title);
+      }
+      return 0;
+    });
+
+    setFilteredTasks(updatedTasks);
+  }, [tasks, statusFilter, sortBy]);
 
   const handleTimeInputChange = (taskId: string, value: string) => {
     setTimeInputs((prev) => ({ ...prev, [taskId]: value }));
   };
 
   const handleSubmitTime = async (taskId: string) => {
-    const hours = parseFloat(timeInputs[taskId]);
-    if (isNaN(hours) || hours <= 0 || !userId) return;
+    const minutes = parseFloat(timeInputs[taskId]);
+    if (isNaN(minutes) || minutes <= 0 || !userId) return;
 
-    const today = new Date('2025-04-21').toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0];
     const task = tasks.find((t) => t.id === taskId);
     const alreadyLogged = task?.timeLogs?.some((log) => log.date === today);
 
     if (alreadyLogged) return;
 
     const taskRef = doc(db, 'tasks', taskId.split('-')[0]);
-    const newTimeLog: TimeLog = { date: today, hours, userId };
+    const newTimeLog: TimeLog = { date: today, minutes, userId };
 
     try {
       await updateDoc(taskRef, { timeLogs: arrayUnion(newTimeLog) });
       setTasks((prev) =>
+        prev.map((task) =>
+          task.id === taskId
+            ? { ...task, timeLogs: [...(task.timeLogs || []), newTimeLog] }
+            : task
+        )
+      );
+      setFilteredTasks((prev) =>
         prev.map((task) =>
           task.id === taskId
             ? { ...task, timeLogs: [...(task.timeLogs || []), newTimeLog] }
@@ -304,6 +301,11 @@ export const UserDashboard = () => {
           task.id === taskId ? { ...task, status: validStatus } : task
         )
       );
+      setFilteredTasks((prev) =>
+        prev.map((task) =>
+          task.id === taskId ? { ...task, status: validStatus } : task
+        )
+      );
     } catch (err) {
       console.error('Error updating task status:', err);
       setError('Failed to update task status');
@@ -315,24 +317,58 @@ export const UserDashboard = () => {
   if (loading) return <div style={{ padding: '24px', color: '#6b7280', textAlign: 'center' }}>Loading tasks...</div>;
   if (error) return <div style={{ padding: '24px', color: '#ef4444', textAlign: 'center' }}>{error}</div>;
 
-  const pendingTasks = tasks.filter((task) => task.status === 'pending');
-  const inProgressTasks = tasks.filter((task) => task.status === 'in_progress');
-  const overdueTasks = tasks.filter((task) => task.status === 'overdue');
-  const completedTasks = tasks.filter((task) => task.status === 'completed');
+  const pendingTasks = filteredTasks.filter((task) => task.status === 'pending');
+  const inProgressTasks = filteredTasks.filter((task) => task.status === 'in_progress');
+  const overdueTasks = filteredTasks.filter((task) => task.status === 'overdue');
+  const completedTasks = filteredTasks.filter((task) => task.status === 'completed');
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f3f4f6', padding: '16px' }}>
       <div style={{ maxWidth: '1280px', margin: '0 auto' }}>
         <h1 style={{ fontSize: '24px', fontWeight: '600', color: '#1f2937', marginBottom: '24px' }}>
-          Hi, {name}
+          Hi, {name || 'User'}
         </h1>
         <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#1f2937', marginBottom: '24px' }}>
           It always seems impossible until it's done.
         </h3>
 
-        {/* Pie Chart */}
-        <div style={{ marginBottom: '40px', textAlign: 'center' }}>
-          <canvas id="taskChart" style={{ maxWidth: '400px', margin: '0 auto' }}></canvas>
+        {/* Filter and Sort Controls */}
+        <div style={{ marginBottom: '24px', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+          <div>
+            <label style={{ fontSize: '14px', color: '#4b5563', marginRight: '8px' }}>Filter by Status:</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={{
+                padding: '8px',
+                borderRadius: '4px',
+                border: '1px solid #d1d5db',
+                fontSize: '14px',
+              }}
+            >
+              <option value="all">All</option>
+              <option value="pending">Pending</option>
+              <option value="in_progress">In Progress</option>
+              <option value="overdue">Overdue</option>
+              <option value="completed">Completed</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: '14px', color: '#4b5563', marginRight: '8px' }}>Sort by:</label>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              style={{
+                padding: '8px',
+                borderRadius: '4px',
+                border: '1px solid #d1d5db',
+                fontSize: '14px',
+              }}
+            >
+              <option value="dueDate">Due Date</option>
+              <option value="title">Title</option>
+            </select>
+          </div>
         </div>
 
         {/* Pending Section */}
@@ -367,6 +403,17 @@ export const UserDashboard = () => {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <h4 style={{ fontSize: '18px', fontWeight: '500', color: '#111827' }}>{task.title}</h4>
                     {task.description && <p style={{ color: '#4b5563', fontSize: '14px' }}>{task.description}</p>}
+                    {task.links && (
+                      <p className="text-xs sm:text-sm md:text-base mb-2 text-blue-600 hover:underline">
+                        <a
+                          href={task.links.startsWith('http://') || task.links.startsWith('https://') ? task.links : `https://${task.links}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {task.links}
+                        </a>
+                      </p>
+                    )}
                     <div style={{ display: 'grid', gap: '4px', fontSize: '14px' }}>
                       <span style={{ fontWeight: '500', color: getDueStatus(task.dueDate) }}>
                         Due: {formatDateTime(task.dueDate.split('T')[0], task.dueDate.split('T')[1]?.slice(0, 5) || '00:00')}
@@ -381,7 +428,22 @@ export const UserDashboard = () => {
                         Assigned: {getUserName(task.assignedUserId)}
                         {getUserPhone(task.assignedUserId) && (
                           <div style={{ display: 'inline-flex', marginLeft: '4px', gap: '4px' }}>
-                            
+                            <a
+                              href={`tel:${getUserPhone(task.assignedUserId)}`}
+                              style={{ color: '#2563eb' }}
+                              aria-label={`Call ${getUserName(task.assignedUserId)}`}
+                            >
+                              <Phone size={16} />
+                            </a>
+                            <a
+                              href={`https://wa.me/${getUserPhone(task.assignedUserId)}?text=${encodeURIComponent('Regarding task: ' + task.title)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: '#16a34a' }}
+                              aria-label={`Message ${getUserName(task.assignedUserId)} on WhatsApp about ${task.title}`}
+                            >
+                              <MessageSquareText size={16} />
+                            </a>
                           </div>
                         )}
                       </span>
@@ -461,6 +523,17 @@ export const UserDashboard = () => {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <h4 style={{ fontSize: '18px', fontWeight: '500', color: '#111827' }}>{task.title}</h4>
                     {task.description && <p style={{ color: '#4b5563', fontSize: '14px' }}>{task.description}</p>}
+                    {task.links && (
+                      <p className="text-xs sm:text-sm md:text-base mb-2 text-blue-600 hover:underline">
+                        <a
+                          href={task.links.startsWith('http://') || task.links.startsWith('https://') ? task.links : `https://${task.links}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {task.links}
+                        </a>
+                      </p>
+                    )}
                     <div style={{ display: 'grid', gap: '4px', fontSize: '14px' }}>
                       <span style={{ fontWeight: '500', color: getDueStatus(task.dueDate) }}>
                         Due: {formatDateTime(task.dueDate.split('T')[0], task.dueDate.split('T')[1]?.slice(0, 5) || '00:00')}
@@ -475,7 +548,22 @@ export const UserDashboard = () => {
                         Assigned: {getUserName(task.assignedUserId)}
                         {getUserPhone(task.assignedUserId) && (
                           <div style={{ display: 'inline-flex', marginLeft: '4px', gap: '4px' }}>
-                            
+                            <a
+                              href={`tel:${getUserPhone(task.assignedUserId)}`}
+                              style={{ color: '#2563eb' }}
+                              aria-label={`Call ${getUserName(task.assignedUserId)}`}
+                            >
+                              <Phone size={16} />
+                            </a>
+                            <a
+                              href={`https://wa.me/${getUserPhone(task.assignedUserId)}?text=${encodeURIComponent('Regarding task: ' + task.title)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: '#16a34a' }}
+                              aria-label={`Message ${getUserName(task.assignedUserId)} on WhatsApp about ${task.title}`}
+                            >
+                              <MessageSquareText size={16} />
+                            </a>
                           </div>
                         )}
                       </span>
@@ -528,7 +616,7 @@ export const UserDashboard = () => {
                           type="number"
                           min="0"
                           step="0.5"
-                          placeholder="Hours"
+                          placeholder="Minutes"
                           style={{
                             border: '1px solid #d1d5db',
                             borderRadius: '4px',
@@ -559,8 +647,8 @@ export const UserDashboard = () => {
                     </div>
                     {task.timeLogs && task.timeLogs.length > 0 && (
                       <p style={{ marginTop: '8px', color: '#4b5563', fontSize: '14px' }}>
-                        Logged: {task.timeLogs[task.timeLogs.length - 1].hours} hr
-                        {task.timeLogs[task.timeLogs.length - 1].hours !== 1 ? 's' : ''} on{' '}
+                        Logged: {task.timeLogs[task.timeLogs.length - 1].minutes} min
+                        {task.timeLogs[task.timeLogs.length - 1].minutes !== 1 ? 's' : ''} on{' '}
                         {task.timeLogs[task.timeLogs.length - 1].date}
                       </p>
                     )}
@@ -595,6 +683,17 @@ export const UserDashboard = () => {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <h4 style={{ fontSize: '18px', fontWeight: '500', color: '#111827' }}>{task.title}</h4>
                     {task.description && <p style={{ color: '#4b5563', fontSize: '14px' }}>{task.description}</p>}
+                    {task.links && (
+                      <p className="text-xs sm:text-sm md:text-base mb-2 text-blue-600 hover:underline">
+                        <a
+                          href={task.links.startsWith('http://') || task.links.startsWith('https://') ? task.links : `https://${task.links}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {task.links}
+                        </a>
+                      </p>
+                    )}
                     <div style={{ display: 'grid', gap: '4px', fontSize: '14px' }}>
                       <span style={{ fontWeight: '500', color: getDueStatus(task.dueDate) }}>
                         Due: {formatDateTime(task.dueDate.split('T')[0], task.dueDate.split('T')[1]?.slice(0, 5) || '00:00')}
@@ -609,7 +708,22 @@ export const UserDashboard = () => {
                         Assigned: {getUserName(task.assignedUserId)}
                         {getUserPhone(task.assignedUserId) && (
                           <div style={{ display: 'inline-flex', marginLeft: '4px', gap: '4px' }}>
-                            
+                            <a
+                              href={`tel:${getUserPhone(task.assignedUserId)}`}
+                              style={{ color: '#2563eb' }}
+                              aria-label={`Call ${getUserName(task.assignedUserId)}`}
+                            >
+                              <Phone size={16} />
+                            </a>
+                            <a
+                              href={`https://wa.me/${getUserPhone(task.assignedUserId)}?text=${encodeURIComponent('Regarding task: ' + task.title)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: '#16a34a' }}
+                              aria-label={`Message ${getUserName(task.assignedUserId)} on WhatsApp about ${task.title}`}
+                            >
+                              <MessageSquareText size={16} />
+                            </a>
                           </div>
                         )}
                       </span>
@@ -689,6 +803,17 @@ export const UserDashboard = () => {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <h4 style={{ fontSize: '18px', fontWeight: '500', color: '#111827' }}>{task.title}</h4>
                     {task.description && <p style={{ color: '#4b5563', fontSize: '14px' }}>{task.description}</p>}
+                    {task.links && (
+                      <p className="text-xs sm:text-sm md:text-base mb-2 text-blue-600 hover:underline">
+                        <a
+                          href={task.links.startsWith('http://') || task.links.startsWith('https://') ? task.links : `https://${task.links}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {task.links}
+                        </a>
+                      </p>
+                    )}
                     <div style={{ display: 'grid', gap: '4px', fontSize: '14px' }}>
                       <span style={{ fontWeight: '500', color: getDueStatus(task.dueDate) }}>
                         Due: {formatDateTime(task.dueDate.split('T')[0], task.dueDate.split('T')[1]?.slice(0, 5) || '00:00')}
@@ -703,7 +828,22 @@ export const UserDashboard = () => {
                         Assigned: {getUserName(task.assignedUserId)}
                         {getUserPhone(task.assignedUserId) && (
                           <div style={{ display: 'inline-flex', marginLeft: '4px', gap: '4px' }}>
-                            
+                            <a
+                              href={`tel:${getUserPhone(task.assignedUserId)}`}
+                              style={{ color: '#2563eb' }}
+                              aria-label={`Call ${getUserName(task.assignedUserId)}`}
+                            >
+                              <Phone size={16} />
+                            </a>
+                            <a
+                              href={`https://wa.me/${getUserPhone(task.assignedUserId)}?text=${encodeURIComponent('Regarding task: ' + task.title)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: '#16a34a' }}
+                              aria-label={`Message ${getUserName(task.assignedUserId)} on WhatsApp about ${task.title}`}
+                            >
+                              <MessageSquareText size={16} />
+                            </a>
                           </div>
                         )}
                       </span>

@@ -29,7 +29,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Tasks', href: '/tasks', icon: CheckSquare },
     { name: 'Contacts', href: '/admincontacts', icon: Users },
     { name: 'Search', href: '/adminsearch', icon: Search },
-    { name: 'Templates', href: '/templates', icon: FileText },
+    { name: 'Templates', href: '/admintemplates', icon: FileText },
     { name: 'Time Log', href: '/time-log', icon: Clock },
     { name: 'Add Users', href: '/adduser', icon: PlusSquareIcon },
     { name: 'Guidelines', href: '/adminguidelines', icon: Book },

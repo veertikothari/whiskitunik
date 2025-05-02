@@ -30,15 +30,15 @@ interface User {
 
 interface UserEfficiency {
   userId: string;
-  name: string; // Added to store user name
-  totalHours: number;
+  name: string;
+  totalMinutes: number; // Changed from totalHours
   taskCount: number;
-  avgHoursPerTask: number;
+  avgMinutesPerTask: number; // Changed from avgHoursPerTask
 }
 
 export function TimeLog() {
   const [efficiencyData, setEfficiencyData] = useState<UserEfficiency[]>([]);
-  const [users, setUsers] = useState<User[]>([]); // State to store user data
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -50,7 +50,7 @@ export function TimeLog() {
 
       const taskSnap = await getDocs(collection(db, 'tasks'));
 
-      const efficiencyMap: { [userId: string]: { totalHours: number; taskCount: number } } = {};
+      const efficiencyMap: { [userId: string]: { totalMinutes: number; taskCount: number } } = {};
 
       taskSnap.docs.forEach(docSnap => {
         const task = docSnap.data() as Task;
@@ -61,10 +61,10 @@ export function TimeLog() {
           uniqueUsers.add(userId);
 
           if (!efficiencyMap[userId]) {
-            efficiencyMap[userId] = { totalHours: 0, taskCount: 0 };
+            efficiencyMap[userId] = { totalMinutes: 0, taskCount: 0 };
           }
 
-          efficiencyMap[userId].totalHours += log.hours;
+          efficiencyMap[userId].totalMinutes += log.hours * 60; // Convert hours to minutes
         });
 
         uniqueUsers.forEach(userId => {
@@ -76,10 +76,10 @@ export function TimeLog() {
         const user = usersList.find(u => u.id === userId);
         return {
           userId,
-          name: user ? user.name : userId, // Use name if found, otherwise fallback to userId
-          totalHours: parseFloat(data.totalHours.toFixed(2)),
+          name: user ? user.name : userId,
+          totalMinutes: parseFloat(data.totalMinutes.toFixed(2)), // Changed from totalHours
           taskCount: data.taskCount,
-          avgHoursPerTask: data.taskCount > 0 ? parseFloat((data.totalHours / data.taskCount).toFixed(2)) : 0,
+          avgMinutesPerTask: data.taskCount > 0 ? parseFloat((data.totalMinutes / data.taskCount).toFixed(2)) : 0, // Changed from avgHoursPerTask
         };
       });
 
@@ -102,16 +102,16 @@ export function TimeLog() {
         <>
           {/* Bar Chart */}
           <div className="bg-white rounded-lg shadow p-6 mb-8">
-            <h2 className="text-lg font-semibold mb-4">Total Hours by User</h2>
+            <h2 className="text-lg font-semibold mb-4">Total Minutes by User</h2>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={efficiencyData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" /> {/* Changed from userId to name */}
+                <XAxis dataKey="name" />
                 <YAxis />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="totalHours" fill="#3b82f6" name="Total Hours" />
-                <Bar dataKey="avgHoursPerTask" fill="#10b981" name="Avg Hours/Task" />
+                <Bar dataKey="totalMinutes" fill="#3b82f6" name="Total Minutes" /> {/* Changed from totalHours */}
+                <Bar dataKey="avgMinutesPerTask" fill="#10b981" name="Avg Minutes/Task" /> {/* Changed from avgHoursPerTask */}
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -121,19 +121,19 @@ export function TimeLog() {
             <table className="w-full table-auto border-collapse">
               <thead>
                 <tr className="bg-gray-100 text-left">
-                  <th className="p-3 border">User Name</th> {/* Changed from User ID */}
-                  <th className="p-3 border">Total Hours</th>
+                  <th className="p-3 border">User Name</th>
+                  <th className="p-3 border">Total Minutes</th> {/* Changed from Total Hours */}
                   <th className="p-3 border">Tasks Involved</th>
-                  <th className="p-3 border">Avg Hours / Task</th>
+                  <th className="p-3 border">Avg Minutes / Task</th> {/* Changed from Avg Hours / Task */}
                 </tr>
               </thead>
               <tbody>
                 {efficiencyData.map(user => (
                   <tr key={user.userId} className="hover:bg-gray-50">
-                    <td className="p-3 border">{user.name}</td> {/* Changed from userId to name */}
-                    <td className="p-3 border">{user.totalHours}</td>
+                    <td className="p-3 border">{user.name}</td>
+                    <td className="p-3 border">{user.totalMinutes}</td> {/* Changed from totalHours */}
                     <td className="p-3 border">{user.taskCount}</td>
-                    <td className="p-3 border">{user.avgHoursPerTask}</td>
+                    <td className="p-3 border">{user.avgMinutesPerTask}</td> {/* Changed from avgHoursPerTask */}
                   </tr>
                 ))}
               </tbody>

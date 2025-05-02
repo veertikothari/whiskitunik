@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Trash2, Edit, Plus, Phone, MessageSquareText, Circle } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Trash2, Edit, Plus, Phone, MessageSquareText, Circle, X } from 'lucide-react';
 import { db } from '../lib/firebase';
 import {
   collection,
@@ -14,6 +14,7 @@ interface User {
   id: string;
   email: string;
   phone: string;
+  name: string;
   [key: string]: any;
 }
 
@@ -26,7 +27,7 @@ interface Contact {
   company_name: string;
   date_of_birth: string;
   date_of_anniversary: string;
-  category: string;
+  categories: string[];
   [key: string]: any;
 }
 
@@ -53,8 +54,11 @@ interface Task {
   guidelineId?: string;
   createdAt?: string;
   updatedAt?: string;
+  createdByEmail: string;
   status: string;
   priority?: 'low' | 'medium' | 'high';
+  isPrivate: boolean;
+  links?: string;
 }
 
 interface TaskFormData {
@@ -74,6 +78,8 @@ interface TaskFormData {
   guidelineId: string;
   status: string;
   priority: 'low' | 'medium' | 'high' | '';
+  isPrivate: boolean;
+  links: string;
 }
 
 interface NewContactForm {
@@ -84,7 +90,7 @@ interface NewContactForm {
   company_name: string;
   date_of_birth: string;
   date_of_anniversary: string;
-  category: string;
+  categories: string[];
 }
 
 interface NewGuidelineForm {
@@ -116,6 +122,8 @@ export function AdminTasks() {
     guidelineId: '',
     priority: '',
     status: 'pending',
+    isPrivate: false,
+    links: '',
   });
   const [newContactForm, setNewContactForm] = useState<NewContactForm>({
     name: '',
@@ -125,20 +133,48 @@ export function AdminTasks() {
     company_name: '',
     date_of_birth: '',
     date_of_anniversary: '',
-    category: ''
+    categories: [],
   });
   const [newGuidelineForm, setNewGuidelineForm] = useState<NewGuidelineForm>({
     title: '',
-    description: ''
+    description: '',
   });
+  const [categories, setCategories] = useState<string[]>([]);
+  const [categorySearchQuery, setCategorySearchQuery] = useState<string>('');
+  const [showAddCategory, setShowAddCategory] = useState<boolean>(false);
+  const [newCategory, setNewCategory] = useState<string>('');
+  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState<boolean>(false);
   const [filterDueDate, setFilterDueDate] = useState<string>('');
   const [filterAssignedUser, setFilterAssignedUser] = useState<string>('');
   const [filterFrequency, setFilterFrequency] = useState<string>('');
   const [filterPriority, setFilterPriority] = useState<string>('');
   const [sortField, setSortField] = useState<string>('dueDate');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [filterUserSearch, setFilterUserSearch] = useState<string>('');
+  const [taskUserSearch, setTaskUserSearch] = useState<string>('');
+  const [contactSearch, setContactSearch] = useState<string>('');
+  const [prioritySearch, setPrioritySearch] = useState<string>('');
+  const [guidelineSearch, setGuidelineSearch] = useState<string>('');
+  const [isOverdueFilterActive, setIsOverdueFilterActive] = useState<boolean>(false);
 
   const email = localStorage.getItem('userEmail');
+  const today = new Date().toISOString().split('T')[0];
+
+  // Dropdown refs
+  const categoryDropdownRef = useRef<HTMLDivElement>(null);
+
+  const [showTaskUserDropdown, setShowTaskUserDropdown] = useState(false);
+  const taskUserDropdownRef = useRef<HTMLDivElement>(null);
+  const [showFilterUserDropdown, setShowFilterUserDropdown] = useState(false);
+  const filterUserDropdownRef = useRef<HTMLDivElement>(null);
+  const [showContactDropdown, setShowContactDropdown] = useState(false);
+  const contactDropdownRef = useRef<HTMLDivElement>(null);
+  const [showPriorityDropdown, setShowPriorityDropdown] = useState(false);
+  const priorityDropdownRef = useRef<HTMLDivElement>(null);
+  const [showFilterGuidelineDropdown, setShowFilterGuidelineDropdown] = useState(false);
+  const filterGuidelineDropdownRef = useRef<HTMLDivElement>(null);
+  const [showGuidelineDropdown, setShowGuidelineDropdown] = useState(false);
+  const guidelineDropdownRef = useRef<HTMLDivElement>(null);
 
   const getCurrentDate = (): string => new Date().toISOString().split('T')[0];
   const getCurrentTime = (): string => new Date().toTimeString().slice(0, 5);
@@ -148,26 +184,93 @@ export function AdminTasks() {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
     });
   };
 
-  useEffect(() => {
+  const getOverdueTime = (dueDate: string): string => {
+    const now = new Date();
+    const taskDue = new Date(dueDate);
+    const diffMs = now.getTime() - taskDue.getTime();
+    
+    if (diffMs <= 0) return '';
+
+    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+    let timeString = '';
+    if (days > 0) timeString += `${days}d `;
+    if (hours > 0 || days > 0) timeString += `${hours}h `;
+    timeString += `${minutes}m`;
+
+    return ` (Overdue by: ${timeString.trim()})`;
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const snapshot = await getDocs(collection(db, 'contacts'));
+      const allCategories = snapshot.docs
+        .flatMap((doc) => {
+          if (!doc.exists()) return [];
+          const data = doc.data();
+          return Array.isArray(data.categories) ? data.categories : data.category ? [data.category] : [];
+        })
+        .filter((cat): cat is string => cat !== undefined && cat.trim() !== '');
+      const uniqueCategories = [...new Set(allCategories)];
+      setCategories(uniqueCategories);
+    } catch (err) {
+      console.error('Error fetching categories:', err);
+    }
+  };
+
+  useEffect(() => 
+    {
     const fetchData = async () => {
       try {
         const [userSnap, contactSnap, guidelineSnap, taskSnap] = await Promise.all([
           getDocs(collection(db, 'users')),
           getDocs(collection(db, 'contacts')),
           getDocs(collection(db, 'guidelines')),
-          getDocs(collection(db, 'tasks'))
+          getDocs(collection(db, 'tasks')),
         ]);
 
         setUsers(userSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
-        setContacts(contactSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Contact)));
+        setContacts(
+          contactSnap.docs.map(doc => {
+            const data = doc.data();
+            const categories = Array.isArray(data.categories)
+              ? data.categories
+              : data.category && typeof data.category === 'string'
+              ? [data.category]
+              : [];
+            return {
+              id: doc.id,
+              name: data.name || '',
+              email: data.email || '',
+              phone: data.phone || '',
+              address: data.address || '',
+              company_name: data.company_name || '',
+              date_of_birth: data.date_of_birth || '',
+              date_of_anniversary: data.date_of_anniversary || '',
+              categories,
+            } as Contact;
+          })
+        );
         setGuidelines(guidelineSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guideline)));
 
         const now = Date.now();
         const validTasks: Task[] = [];
+        const baseTasks = taskSnap.docs.map(docSnap => {
+          const taskData = docSnap.data();
+          return {
+            id: docSnap.id,
+            ...taskData,
+            assignedUserId: taskData.assignedUserId || '',
+            isPrivate: taskData.isPrivate || false,
+            links: taskData.links || '',
+          } as Task;
+        });
 
         await Promise.all(
           taskSnap.docs.map(async docSnap => {
@@ -181,12 +284,63 @@ export function AdminTasks() {
             ) {
               await deleteDoc(doc(db, 'tasks', taskId));
             } else {
-              validTasks.push({ id: taskId, ...taskData });
+              validTasks.push({
+                id: taskId,
+                ...taskData,
+                assignedUserId: taskData.assignedUserId || '',
+                isPrivate: taskData.isPrivate || false,
+                links: taskData.links || '',
+              });
             }
           })
         );
 
-        setTasks(validTasks);
+        const recurringTasks: Task[] = [];
+        baseTasks.forEach(task => {
+          const taskDate = new Date(task.dueDate);
+          const todayDate = new Date(today);
+          todayDate.setHours(0, 0, 0, 0);
+          taskDate.setHours(0, 0, 0, 0);
+
+          let isRecurring = false;
+          switch (task.frequency) {
+            case 'daily':
+              isRecurring = true;
+              break;
+            case 'weekly':
+              isRecurring = (todayDate.getTime() - taskDate.getTime()) % (7 * 24 * 60 * 60 * 1000) === 0;
+              break;
+            case 'monthly':
+              isRecurring = taskDate.getDate() === todayDate.getDate() && taskDate.getMonth() !== todayDate.getMonth();
+              break;
+            case 'date-wise':
+              if (task.repeatDate) {
+                const repeatDate = new Date(task.repeatDate).getTime();
+                isRecurring = todayDate.getTime() >= repeatDate;
+              }
+              break;
+            default:
+              isRecurring = false;
+          }
+
+          if (isRecurring && task.status !== 'completed') {
+            const newTask: Task = {
+              ...task,
+              id: `${task.id}-${today}`,
+              dueDate: today + 'T' + (task.dueDate.split('T')[1] || '00:00'),
+              links: task.links || '',
+            };
+            recurringTasks.push(newTask);
+          }
+          if (
+            !(task.status === 'completed' && task.updatedAt && now - new Date(task.updatedAt).getTime() > 30 * 24 * 60 * 60 * 1000)
+          ) {
+            recurringTasks.push(task);
+          }
+        });
+
+        setTasks(recurringTasks);
+        await fetchCategories();
         setLoading(false);
       } catch (err) {
         setError('Failed to load data');
@@ -195,21 +349,42 @@ export function AdminTasks() {
       }
     };
 
+    const fetchCategories = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'contacts'));
+        const allCategories = snapshot.docs
+          .flatMap((doc) => {
+            if (!doc.exists()) return [];
+            const data = doc.data();
+            return Array.isArray(data.categories) ? data.categories : data.category ? [data.category] : [];
+          })
+          .filter((cat): cat is string => cat !== undefined && cat.trim() !== '');
+        const uniqueCategories = [...new Set(allCategories)];
+        console.log('Fetched categories:', uniqueCategories);
+        setCategories(uniqueCategories);
+      } catch (err) {
+        console.error('Fetch categories error:', err);
+      }
+    };
+
     fetchData();
-  }, []);
+  }, [email, today]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
+    const { name, value, type } = e.target;
     setFormData(prev => {
+      if (type === 'checkbox') {
+        return { ...prev, [name]: (e.target as HTMLInputElement).checked };
+      }
       if (name === 'frequency') {
         const newSubdivision = value === 'date-wise' ? { repeatDate: prev.repeatDate || getCurrentDate() } : {};
-        return { ...prev, [name]: value, frequencySubdivision: {} };
+        return { ...prev, [name]: value, frequencySubdivision: newSubdivision };
       }
       if (name.startsWith('frequencySubdivision')) {
         const subType = name.split('.')[1];
         return {
           ...prev,
-          frequencySubdivision: { [subType]: value }
+          frequencySubdivision: { ...prev.frequencySubdivision, [subType]: value },
         };
       }
       return { ...prev, [name]: value };
@@ -226,6 +401,40 @@ export function AdminTasks() {
     setNewGuidelineForm(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleAddCategory = (category: string) => {
+    if (!newContactForm.categories.includes(category)) {
+      setNewContactForm(prev => ({
+        ...prev,
+        categories: [...prev.categories, category],
+      }));
+    }
+    setCategorySearchQuery('');
+    setIsCategoryDropdownOpen(false);
+  };
+
+  const handleRemoveCategory = (category: string) => {
+    setNewContactForm(prev => ({
+      ...prev,
+      categories: prev.categories.filter(cat => cat !== category),
+    }));
+  };
+
+  const handleAddNewCategory = () => {
+    if (newCategory.trim()) {
+      if (!categories.includes(newCategory)) {
+        setCategories(prev => [...prev, newCategory]);
+      }
+      if (!newContactForm.categories.includes(newCategory)) {
+        setNewContactForm(prev => ({
+          ...prev,
+          categories: [...prev.categories, newCategory],
+        }));
+      }
+      setShowAddCategory(false);
+      setNewCategory('');
+    }
+  };
+
   const handleAddTask = () => {
     setIsAddingTask(true);
     setIsEditingTask(null);
@@ -239,11 +448,13 @@ export function AdminTasks() {
       frequency: '',
       frequencySubdivision: {},
       repeatDate: '',
-      assignedUserId: users[0]?.id || '',
+      assignedUserId: '',
       referenceContactId: '',
       guidelineId: '',
       priority: 'medium',
-      status:'pending',
+      status: 'pending',
+      isPrivate: false,
+      links: '',
     });
     setNewContactForm({
       name: '',
@@ -253,9 +464,13 @@ export function AdminTasks() {
       company_name: '',
       date_of_birth: '',
       date_of_anniversary: '',
-      category: ''
+      categories: [],
     });
     setNewGuidelineForm({ title: '', description: '' });
+    setTaskUserSearch('');
+    setContactSearch('');
+    setPrioritySearch('');
+    setGuidelineSearch('');
   };
 
   const handleEditTask = (task: Task) => {
@@ -271,12 +486,18 @@ export function AdminTasks() {
       frequency: task.frequency || '',
       frequencySubdivision: task.frequencySubdivision || {},
       repeatDate: task.repeatDate || '',
-      assignedUserId: task.assignedUserId,
+      assignedUserId: task.assignedUserId || '',
       referenceContactId: task.referenceContactId || '',
       guidelineId: task.guidelineId || '',
       priority: task.priority || 'medium',
-      status: task.status || 'pending'
+      status: task.status || 'pending',
+      isPrivate: task.isPrivate || false,
+      links: task.links || '',
     });
+    setTaskUserSearch('');
+    setContactSearch('');
+    setPrioritySearch('');
+    setGuidelineSearch('');
   };
 
   const handleCancel = () => {
@@ -297,6 +518,8 @@ export function AdminTasks() {
       guidelineId: '',
       priority: '',
       status: '',
+      isPrivate: false,
+      links: '',
     });
     setNewContactForm({
       name: '',
@@ -306,9 +529,18 @@ export function AdminTasks() {
       company_name: '',
       date_of_birth: '',
       date_of_anniversary: '',
-      category: ''
+      categories: [],
     });
     setNewGuidelineForm({ title: '', description: '' });
+    setTaskUserSearch('');
+    setContactSearch('');
+    setPrioritySearch('');
+    setGuidelineSearch('');
+    setFilterUserSearch('');
+    setCategorySearchQuery('');
+    setShowAddCategory(false);
+    setNewCategory('');
+    setIsCategoryDropdownOpen(false);
   };
 
   const handleAddNewContact = async () => {
@@ -318,7 +550,7 @@ export function AdminTasks() {
       const newRef = doc(collection(db, 'contacts'));
       await setDoc(newRef, {
         ...newContactForm,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
       });
 
       const newContact = { id: newRef.id, ...newContactForm } as Contact;
@@ -332,9 +564,13 @@ export function AdminTasks() {
         company_name: '',
         date_of_birth: '',
         date_of_anniversary: '',
-        category: ''
+        categories: [],
       });
       setShowNewContactForm(false);
+      setCategorySearchQuery('');
+      setShowAddCategory(false);
+      setNewCategory('');
+      setIsCategoryDropdownOpen(false);
     } catch (err) {
       console.error('Failed to add contact', err);
     }
@@ -348,15 +584,15 @@ export function AdminTasks() {
       await setDoc(newRef, {
         title: newGuidelineForm.title,
         description: newGuidelineForm.description,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
       });
 
       const newGuideline = { id: newRef.id, ...newGuidelineForm } as Guideline;
       setGuidelines(prev => [...prev, newGuideline]);
-      setFormData(prev => ({ 
-        ...prev, 
+      setFormData(prev => ({
+        ...prev,
         guidelineId: newRef.id,
-        description: newGuidelineForm.description
+        description: newGuidelineForm.description,
       }));
       setNewGuidelineForm({ title: '', description: '' });
       setShowNewGuidelineForm(false);
@@ -369,27 +605,29 @@ export function AdminTasks() {
     try {
       if (!formData.title || !formData.dueDate || !formData.assignedUserId) return;
 
-      const taskData = {
+      const taskData: Omit<Task, 'id'> = {
         ...formData,
         dueDate: `${formData.dueDate}T${formData.dueTime}`,
         updatedAt: new Date().toISOString(),
-        createdByEmail: email
+        createdByEmail: email || '',
+        isPrivate: formData.isPrivate,
+        links: formData.links,
       };
 
       if (isEditingTask) {
         await updateDoc(doc(db, 'tasks', isEditingTask), taskData);
         setTasks(prev =>
           prev.map(task =>
-            task.id === isEditingTask ? { id: isEditingTask, ...taskData } : task
+            task.id === isEditingTask ? { ...taskData, id: isEditingTask } : task
           )
         );
       } else {
         const newRef = doc(collection(db, 'tasks'));
         await setDoc(newRef, {
           ...taskData,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
         });
-        setTasks(prev => [...prev, { id: newRef.id, ...taskData } as Task]);
+        setTasks(prev => [...prev, { ...taskData, id: newRef.id }]);
       }
 
       handleCancel();
@@ -410,7 +648,7 @@ export function AdminTasks() {
 
   const getContactDetails = (id: string): { name: string; phone: string | null } => {
     const contact = contacts.find(c => c.id === id);
-    return contact 
+    return contact
       ? { name: contact.name || 'No name', phone: contact.phone || null }
       : { name: 'None', phone: null };
   };
@@ -432,10 +670,10 @@ export function AdminTasks() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const taskDate = new Date(dueDate);
-    
+
     const diffTime = taskDate.getTime() - today.getTime();
     const diffDays = diffTime / (1000 * 60 * 60 * 24);
-    
+
     if (diffTime < 0) return 'text-red-500';
     if (diffDays === 0) return 'text-orange-500';
     if (diffDays <= 2) return 'text-blue-500';
@@ -453,8 +691,18 @@ export function AdminTasks() {
 
   const filteredAndSortedTasks = tasks
     .filter(task => {
+      const isAdminTask = task.createdByEmail === email;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const taskDueDate = new Date(task.dueDate);
+
       return (
-        (!filterDueDate || task.dueDate.split('T')[0] === filterDueDate) &&
+        (!task.isPrivate || !isAdminTask) &&
+        (!filterDueDate ||
+          (isOverdueFilterActive
+            ? taskDueDate.getTime() < today.getTime() && task.status !== 'completed'
+            : task.dueDate.split('T')[0] === filterDueDate)
+        ) &&
         (!filterAssignedUser || task.assignedUserId === filterAssignedUser) &&
         (!filterFrequency || task.frequency === filterFrequency) &&
         (!filterPriority || task.priority === filterPriority)
@@ -466,11 +714,13 @@ export function AdminTasks() {
         case 'dueDate':
           return multiplier * (new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
         case 'assignedUser':
-          return multiplier * getUserName(a.assignedUserId).localeCompare(getUserName(b.assignedUserId));
+          const aName = getUserName(a.assignedUserId);
+          const bName = getUserName(b.assignedUserId);
+          return multiplier * aName.localeCompare(bName);
         case 'frequency':
           return multiplier * (a.frequency || '').localeCompare(b.frequency || '');
         case 'priority':
-          const priorityOrder = { 'high': 3, 'medium': 2, 'low': 1 };
+          const priorityOrder = { high: 3, medium: 2, low: 1 };
           return multiplier * ((priorityOrder[b.priority || 'medium'] || 0) - (priorityOrder[a.priority || 'medium'] || 0));
         default:
           return 0;
@@ -479,7 +729,7 @@ export function AdminTasks() {
 
   const toggleSort = (field: string) => {
     if (sortField === field) {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortField(field);
       setSortDirection('asc');
@@ -500,6 +750,97 @@ export function AdminTasks() {
     return '';
   };
 
+  const handleTaskUserSelect = (userId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      assignedUserId: userId,
+    }));
+    setShowTaskUserDropdown(false);
+    setTaskUserSearch('');
+  };
+
+  const handleFilterUserSelect = (userId: string) => {
+    setFilterAssignedUser(userId);
+    setShowFilterUserDropdown(false);
+    setFilterUserSearch('');
+  };
+
+  const handleContactSelect = (contactId: string) => {
+    setFormData(prev => ({ ...prev, referenceContactId: contactId }));
+    setShowContactDropdown(false);
+    setContactSearch('');
+  };
+
+  const handleGuidelineSelect = (guidelineId: string) => {
+    const guideline = guidelines.find(g => g.id === guidelineId);
+    setFormData(prev => ({
+      ...prev,
+      guidelineId: guidelineId,
+      description: guideline ? guideline.description : prev.description,
+    }));
+    setShowGuidelineDropdown(false);
+    setGuidelineSearch('');
+  };
+
+  const priorities = [
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+  ];
+
+  const handlePrioritySelect = (priority: string) => {
+    setFormData(prev => ({ ...prev, priority: priority as 'low' | 'medium' | 'high' }));
+    setShowPriorityDropdown(false);
+    setPrioritySearch('');
+  };
+
+  const handleOverdueFilter = () => {
+    setFilterDueDate('');
+    setFilterAssignedUser('');
+    setFilterFrequency('');
+    setFilterPriority('');
+    setSortField('dueDate');
+    setSortDirection('asc');
+    setFilterUserSearch('');
+    setIsOverdueFilterActive(true);
+  };
+
+  const handleResetFilters = () => {
+    setFilterDueDate('');
+    setFilterAssignedUser('');
+    setFilterFrequency('');
+    setFilterPriority('');
+    setSortField('dueDate');
+    setSortDirection('asc');
+    setFilterUserSearch('');
+    setIsOverdueFilterActive(false);
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (filterUserDropdownRef.current && !filterUserDropdownRef.current.contains(event.target as Node)) {
+        setShowFilterUserDropdown(false);
+      }
+      if (taskUserDropdownRef.current && !taskUserDropdownRef.current.contains(event.target as Node)) {
+        setShowTaskUserDropdown(false);
+      }
+      if (contactDropdownRef.current && !contactDropdownRef.current.contains(event.target as Node)) {
+        setShowContactDropdown(false);
+      }
+      if (priorityDropdownRef.current && !priorityDropdownRef.current.contains(event.target as Node)) {
+        setShowPriorityDropdown(false);
+      }
+      if (guidelineDropdownRef.current && !guidelineDropdownRef.current.contains(event.target as Node)) {
+        setShowGuidelineDropdown(false);
+      }
+      if (categoryDropdownRef.current && !categoryDropdownRef.current.contains(event.target as Node)) {
+        setIsCategoryDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-100 p-4 sm:p-6">
       {/* Filter and Sort Controls */}
@@ -511,22 +852,53 @@ export function AdminTasks() {
             <input
               type="date"
               value={filterDueDate}
-              onChange={(e) => setFilterDueDate(e.target.value)}
+              onChange={(e) => {
+                setFilterDueDate(e.target.value);
+                setIsOverdueFilterActive(false);
+              }}
               className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
             />
           </div>
-          <div>
+          <div ref={filterUserDropdownRef}>
             <label className="block text-sm text-gray-700">Assigned User</label>
-            <select
-              value={filterAssignedUser}
-              onChange={(e) => setFilterAssignedUser(e.target.value)}
-              className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
-            >
-              <option value="">All Users</option>
-              {users.map(user => (
-                <option key={user.id} value={user.id}>{user.name}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <input
+                type="text"
+                value={filterAssignedUser ? getUserName(filterAssignedUser) : filterUserSearch}
+                onChange={(e) => setFilterUserSearch(e.target.value)}
+                onFocus={() => setShowFilterUserDropdown(true)}
+                placeholder="Search users..."
+                className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+              />
+              {showFilterUserDropdown && (
+                <div className="absolute z-10 w-full mt-1 bg-white border rounded shadow-lg max-h-60 overflow-auto">
+                  {users
+                    .filter(user =>
+                      user.name.toLowerCase().includes(filterUserSearch.toLowerCase()) ||
+                      user.email.toLowerCase().includes(filterUserSearch.toLowerCase())
+                    )
+                    .map(user => (
+                      <div
+                        key={user.id}
+                        className={`p-2 hover:bg-gray-100 cursor-pointer ${
+                          filterAssignedUser === user.id ? 'bg-blue-100' : ''
+                        }`}
+                        onClick={() => handleFilterUserSelect(user.id)}
+                      >
+                        {user.name} ({user.email})
+                      </div>
+                    ))}
+                  <div
+                    className={`p-2 hover:bg-gray-100 cursor-pointer ${
+                      filterAssignedUser === '' ? 'bg-blue-100' : ''
+                    }`}
+                    onClick={() => handleFilterUserSelect('')}
+                  >
+                    All Users
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <div>
             <label className="block text-sm text-gray-700">Frequency</label>
@@ -556,40 +928,41 @@ export function AdminTasks() {
             </select>
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-4 flex flex-wrap justify-between gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => toggleSort('dueDate')}
+              className={`px-3 py-1 rounded ${sortField === 'dueDate' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+            >
+              Due Date {sortField === 'dueDate' && (sortDirection === 'asc' ? '↑' : '↓')}
+            </button>
+            <button
+              onClick={() => toggleSort('assignedUser')}
+              className={`px-3 py-1 rounded ${sortField === 'assignedUser' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+            >
+              Assigned {sortField === 'assignedUser' && (sortDirection === 'asc' ? '↑' : '↓')}
+            </button>
+            <button
+              onClick={() => toggleSort('frequency')}
+              className={`px-3 py-1 rounded ${sortField === 'frequency' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+            >
+              Frequency {sortField === 'frequency' && (sortDirection === 'asc' ? '↑' : '↓')}
+            </button>
+            <button
+              onClick={() => toggleSort('priority')}
+              className={`px-3 py-1 rounded ${sortField === 'priority' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+            >
+              Priority {sortField === 'priority' && (sortDirection === 'asc' ? '↑' : '↓')}
+            </button>
+            <button
+              onClick={handleOverdueFilter}
+              className={`px-3 py-1 rounded ${isOverdueFilterActive ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+            >
+              Overdue
+            </button>
+          </div>
           <button
-            onClick={() => toggleSort('dueDate')}
-            className={`px-3 py-1 rounded ${sortField === 'dueDate' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
-          >
-            Due Date {sortField === 'dueDate' && (sortDirection === 'asc' ? '↑' : '↓')}
-          </button>
-          <button
-            onClick={() => toggleSort('assignedUser')}
-            className={`px-3 py-1 rounded ${sortField === 'assignedUser' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
-          >
-            Assigned {sortField === 'assignedUser' && (sortDirection === 'asc' ? '↑' : '↓')}
-          </button>
-          <button
-            onClick={() => toggleSort('frequency')}
-            className={`px-3 py-1 rounded ${sortField === 'frequency' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
-          >
-            Frequency {sortField === 'frequency' && (sortDirection === 'asc' ? '↑' : '↓')}
-          </button>
-          <button
-            onClick={() => toggleSort('priority')}
-            className={`px-3 py-1 rounded ${sortField === 'priority' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
-          >
-            Priority {sortField === 'priority' && (sortDirection === 'asc' ? '↑' : '↓')}
-          </button>
-          <button
-            onClick={() => {
-              setFilterDueDate('');
-              setFilterAssignedUser('');
-              setFilterFrequency('');
-              setFilterPriority('');
-              setSortField('dueDate');
-              setSortDirection('asc');
-            }}
+            onClick={handleResetFilters}
             className="px-3 py-1 rounded bg-gray-200 text-gray-700"
           >
             Reset
@@ -623,17 +996,24 @@ export function AdminTasks() {
               autoFocus
             />
           </div>
-          
+
           <div className="space-y-4">
             <textarea
               name="description"
               value={formData.description}
               onChange={handleInputChange}
-              placeholder="Description"
+              placeholder="Description + References"
               className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
               rows={3}
             />
-            
+            <input
+              type="url"
+              name="links"
+              value={formData.links}
+              onChange={handleInputChange}
+              placeholder="Add a link (e.g., https://example.com)"
+              className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
+            />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm sm:text-base md:text-lg text-gray-700">Due Date</label>
@@ -736,57 +1116,117 @@ export function AdminTasks() {
                   />
                 </div>
               )}
-              <div>
+              <div ref={taskUserDropdownRef}>
                 <label className="block text-sm sm:text-base md:text-lg text-gray-700">Assign to</label>
-                <select
-                  name="assignedUserId"
-                  value={formData.assignedUserId}
-                  onChange={handleInputChange}
-                  className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
-                >
-                  <option value="">Select user</option>
-                  {users.map(user => (
-                    <option key={user.id} value={user.id}>
-                      {user.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={formData.assignedUserId ? getUserName(formData.assignedUserId) : taskUserSearch}
+                    onChange={(e) => setTaskUserSearch(e.target.value)}
+                    onFocus={() => setShowTaskUserDropdown(true)}
+                    placeholder="Search users..."
+                    className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
+                  />
+                  {showTaskUserDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border rounded shadow-lg max-h-60 overflow-auto">
+                      {users
+                        .filter(user =>
+                          user.name.toLowerCase().includes(taskUserSearch.toLowerCase()) ||
+                          user.email.toLowerCase().includes(taskUserSearch.toLowerCase())
+                        )
+                        .map(user => (
+                          <div
+                            key={user.id}
+                            className={`p-2 hover:bg-gray-100 cursor-pointer ${
+                              formData.assignedUserId === user.id ? 'bg-blue-100' : ''
+                            }`}
+                            onClick={() => handleTaskUserSelect(user.id)}
+                          >
+                            {user.name} ({user.email})
+                          </div>
+                        ))}
+                      <div
+                        className={`p-2 hover:bg-gray-100 cursor-pointer ${
+                          formData.assignedUserId === '' ? 'bg-blue-100' : ''
+                        }`}
+                        onClick={() => handleTaskUserSelect('')}
+                      >
+                        None
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div>
+              <div ref={priorityDropdownRef}>
                 <label className="block text-sm sm:text-base md:text-lg text-gray-700">Priority</label>
-                <select
-                  name="priority"
-                  value={formData.priority}
-                  onChange={handleInputChange}
-                  className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={prioritySearch || formData.priority}
+                    onChange={(e) => setPrioritySearch(e.target.value)}
+                    onFocus={() => setShowPriorityDropdown(true)}
+                    placeholder="Select priority"
+                    className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
+                  />
+                  {showPriorityDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border rounded shadow-lg max-h-60 overflow-auto">
+                      {priorities
+                        .filter(p => p.label.toLowerCase().includes(prioritySearch.toLowerCase()))
+                        .map(p => (
+                          <div
+                            key={p.value}
+                            className={`p-2 hover:bg-gray-100 cursor-pointer ${
+                              formData.priority === p.value ? 'bg-blue-100' : ''
+                            }`}
+                            onClick={() => handlePrioritySelect(p.value)}
+                          >
+                            {p.label}
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div>
+              <div ref={guidelineDropdownRef}>
                 <label className="block text-sm sm:text-base md:text-lg text-gray-700">Guideline</label>
                 <div className="flex items-center gap-2">
-                  <select
-                    name="guidelineId"
-                    value={formData.guidelineId}
-                    onChange={(e) => {
-                      handleInputChange(e);
-                      const guideline = guidelines.find(g => g.id === e.target.value);
-                      if (guideline) {
-                        setFormData(prev => ({ ...prev, description: guideline.description }));
-                      }
-                    }}
-                    className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
-                  >
-                    <option value="">Select guideline</option>
-                    {guidelines.map(guideline => (
-                      <option key={guideline.id} value={guideline.id}>
-                        {guideline.title}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={guidelineSearch || (formData.guidelineId ? getGuidelineTitle(formData.guidelineId) : '')}
+                      onChange={(e) => setGuidelineSearch(e.target.value)}
+                      onFocus={() => setShowGuidelineDropdown(true)}
+                      placeholder="Search guidelines..."
+                      className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
+                    />
+                    {showGuidelineDropdown && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border rounded shadow-lg max-h-60 overflow-auto">
+                        {guidelines
+                          .filter(guideline =>
+                            guideline.title.toLowerCase().includes(guidelineSearch.toLowerCase())
+                          )
+                          .map(guideline => (
+                            <div
+                              key={guideline.id}
+                              className={`p-2 hover:bg-gray-100 cursor-pointer ${
+                                formData.guidelineId === guideline.id ? 'bg-blue-100' : ''
+                              }`}
+                              onClick={() => handleGuidelineSelect(guideline.id)}
+                            >
+                              {guideline.title}
+                            </div>
+                          ))}
+                        <div
+                          className={`p-2 hover:bg-gray-100 cursor-pointer ${
+                            formData.guidelineId === '' ? 'bg-blue-100' : ''
+                          }`}
+                          onClick={() => handleGuidelineSelect('')}
+                        >
+                          None
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <button
                     onClick={() => setShowNewGuidelineForm(!showNewGuidelineForm)}
                     className="text-blue-600 hover:text-blue-800"
@@ -829,22 +1269,47 @@ export function AdminTasks() {
                   </div>
                 </div>
               )}
-              <div>
+              <div ref={contactDropdownRef}>
                 <label className="block text-sm sm:text-base md:text-lg text-gray-700">Contact</label>
                 <div className="flex items-center gap-2">
-                  <select
-                    name="referenceContactId"
-                    value={formData.referenceContactId}
-                    onChange={handleInputChange}
-                    className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
-                  >
-                    <option value="">Reference contact</option>
-                    {contacts.map(contact => (
-                      <option key={contact.id} value={contact.id}>
-                        {contact.name || 'No name'} ({contact.phone || 'No phone'})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={contactSearch || (formData.referenceContactId ? getContactName(formData.referenceContactId) : '')}
+                      onChange={(e) => setContactSearch(e.target.value)}
+                      onFocus={() => setShowContactDropdown(true)}
+                      placeholder="Search contacts..."
+                      className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
+                    />
+                    {showContactDropdown && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border rounded shadow-lg max-h-60 overflow-auto">
+                        {contacts
+                          .filter(contact =>
+                            contact.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
+                            contact.phone.toLowerCase().includes(contactSearch.toLowerCase())
+                          )
+                          .map(contact => (
+                            <div
+                              key={contact.id}
+                              className={`p-2 hover:bg-gray-100 cursor-pointer ${
+                                formData.referenceContactId === contact.id ? 'bg-blue-100' : ''
+                              }`}
+                              onClick={() => handleContactSelect(contact.id)}
+                            >
+                              {contact.name} ({contact.phone || 'No phone'})
+                            </div>
+                          ))}
+                        <div
+                          className={`p-2 hover:bg-gray-100 cursor-pointer ${
+                            formData.referenceContactId === '' ? 'bg-blue-100' : ''
+                          }`}
+                          onClick={() => handleContactSelect('')}
+                        >
+                          None
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <button
                     onClick={() => setShowNewContactForm(!showNewContactForm)}
                     className="text-blue-600 hover:text-blue-800"
@@ -853,6 +1318,17 @@ export function AdminTasks() {
                   </button>
                 </div>
               </div>
+              <div>
+                <label className="block text-sm sm:text-base md:text-lg text-gray-700">Private Task</label>
+                <input
+                  type="checkbox"
+                  name="isPrivate"
+                  checked={formData.isPrivate}
+                  onChange={handleInputChange}
+                  className="mt-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <span className="ml-2 text-sm text-gray-600">Hide from admin view</span>
+              </div>
               {showNewContactForm && (
                 <div className="col-span-2 space-y-2 p-4 bg-white rounded-lg shadow">
                   <input
@@ -860,7 +1336,7 @@ export function AdminTasks() {
                     name="name"
                     value={newContactForm.name}
                     onChange={handleNewContactInputChange}
-                    placeholder="Name"
+                    placeholder="Name *"
                     className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
                   />
                   <input
@@ -868,7 +1344,7 @@ export function AdminTasks() {
                     name="email"
                     value={newContactForm.email}
                     onChange={handleNewContactInputChange}
-                    placeholder="Email"
+                    placeholder="Email *"
                     className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
                   />
                   <input
@@ -876,7 +1352,7 @@ export function AdminTasks() {
                     name="phone"
                     value={newContactForm.phone}
                     onChange={handleNewContactInputChange}
-                    placeholder="Phone"
+                    placeholder="Phone *"
                     className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
                   />
                   <input
@@ -895,30 +1371,104 @@ export function AdminTasks() {
                     placeholder="Company"
                     className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
                   />
+                  <label className="block text-sm font-medium mb-1">Date of Birth</label>
                   <input
                     type="date"
                     name="date_of_birth"
                     value={newContactForm.date_of_birth}
                     onChange={handleNewContactInputChange}
-                    placeholder="DOB"
                     className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
                   />
+                  <label className="block text-sm font-medium mb-1">Date of Anniversary</label>
                   <input
                     type="date"
                     name="date_of_anniversary"
                     value={newContactForm.date_of_anniversary}
                     onChange={handleNewContactInputChange}
-                    placeholder="Anniversary"
                     className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
                   />
-                  <input
-                    type="text"
-                    name="category"
-                    value={newContactForm.category}
-                    onChange={handleNewContactInputChange}
-                    placeholder="Category"
-                    className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
-                  />
+                  <div className="w-full" ref={categoryDropdownRef}>
+                    <label className="block text-sm font-medium text-gray-700 mb-2 sm:text-base">Categories</label>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {newContactForm.categories.map((cat) => (
+                        <div
+                          key={cat}
+                          className="bg-blue-100 text-blue-800 px-2 py-1 sm:px-3 sm:py-1.5 rounded-full flex items-center text-xs sm:text-sm"
+                        >
+                          <span>{cat}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCategory(cat)}
+                            className="ml-1 text-blue-500 hover:text-blue-700 focus:outline-none"
+                          >
+                            <X size={14} className="sm:w-4 sm:h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="relative w-full">
+                      <input
+                        type="text"
+                        className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
+                        placeholder="Search or select categories..."
+                        value={categorySearchQuery}
+                        onChange={(e) => {
+                          setCategorySearchQuery(e.target.value);
+                          setIsCategoryDropdownOpen(true);
+                        }}
+                        onFocus={() => setIsCategoryDropdownOpen(true)}
+                      />
+                      {isCategoryDropdownOpen && (
+                        <div className="absolute z-10 w-full bg-white border rounded mt-1 max-h-40 overflow-y-auto shadow-lg">
+                          {categories
+                            .filter((cat) => cat.toLowerCase().includes(categorySearchQuery.toLowerCase()))
+                            .map((category) => (
+                              <div
+                                key={category}
+                                className="p-2 hover:bg-gray-100 cursor-pointer"
+                                onClick={() => handleAddCategory(category)}
+                              >
+                                {category}
+                              </div>
+                            ))}
+                          <div
+                            className="p-2 hover:bg-gray-100 cursor-pointer text-blue-600"
+                            onClick={() => {
+                              setShowAddCategory(true);
+                              setIsCategoryDropdownOpen(false);
+                            }}
+                          >
+                            + Add New Category
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {showAddCategory && (
+                      <div className="mt-2 p-2 bg-white border rounded shadow-lg">
+                        <input
+                          type="text"
+                          placeholder="Enter new category"
+                          value={newCategory}
+                          onChange={(e) => setNewCategory(e.target.value)}
+                          className="w-full border px-2 py-1 rounded mb-2"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddNewCategory}
+                          className="px-2 py-1 bg-blue-600 text-white rounded mr-2"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowAddCategory(false)}
+                          className="px-2 py-1 border rounded"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <div className="flex gap-2">
                     <button
                       onClick={handleAddNewContact}
@@ -938,14 +1488,14 @@ export function AdminTasks() {
             </div>
 
             <div className="flex gap-2 pt-2">
-              <button 
-                onClick={handleSubmit} 
+              <button
+                onClick={handleSubmit}
                 className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 transition-colors text-sm sm:text-base md:text-lg"
               >
                 {isEditingTask ? 'Update' : 'Save'}
               </button>
-              <button 
-                onClick={handleCancel} 
+              <button
+                onClick={handleCancel}
                 className="bg-gray-200 text-gray-700 px-3 py-1 rounded hover:bg-gray-300 transition-colors text-sm sm:text-base md:text-lg"
               >
                 Cancel
@@ -973,33 +1523,62 @@ export function AdminTasks() {
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-2">
                     <Circle size={16} className="text-gray-400" />
-                    <h3 className={`font-medium text-sm sm:text-base md:text-lg ${task.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+                    <h3
+                      className={`font-medium text-sm sm:text-base md:text-lg ${
+                        task.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-800'
+                      }`}
+                    >
                       {task.title}
                     </h3>
                   </div>
                   {task.description && (
-                    <p className={`text-xs sm:text-sm md:text-base mb-2 ${task.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-600'}`}>
+                    <p
+                      className={`text-xs sm:text-sm md:text-base mb-2 ${
+                        task.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-600'
+                      }`}
+                    >
                       {task.description}
+                    </p>
+                  )}
+                  {task.links && (
+                    <p className="text-xs sm:text-sm md:text-base mb-2 text-blue-600 hover:underline">
+                      <a
+                        href={task.links.startsWith('http://') || task.links.startsWith('https://') ? task.links : `https://${task.links}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {task.links}
+                      </a>
                     </p>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm md:text-base">
                     <span className={`font-medium ${getDueStatus(task.dueDate)}`}>
                       Due: {formatDateTime(task.dueDate.split('T')[0], task.dueDate.split('T')[1]?.slice(0, 5) || '00:00')}
+                      {task.status !== 'completed' && getOverdueTime(task.dueDate)}
                     </span>
                     {task.frequency && (
                       <span className="text-gray-600">
-                        Frequency: {task.frequency}{getFrequencySubdivisionDisplay(task)}
+                        Frequency: {task.frequency}
+                        {getFrequencySubdivisionDisplay(task)}
                         {task.frequency === 'date-wise' && task.repeatDate ? ` (Repeat: ${task.repeatDate})` : ''}
                       </span>
                     )}
                     <span className="text-gray-600">
-                      Assigned:  {getUserName(task.assignedUserId)}
-                      {getUserPhone(task.assignedUserId) && (
+                      Assigned: {task.assignedUserId ? getUserName(task.assignedUserId) : 'None'}
+                      {task.assignedUserId && getUserPhone(task.assignedUserId) && (
                         <div className="inline-flex ml-1 gap-1">
-                          <a href={`tel:${getUserPhone(task.assignedUserId)}`} className="text-blue-600 hover:text-blue-800">
+                          <a
+                            href={`tel:${getUserPhone(task.assignedUserId)}`}
+                            className="text-blue-600 hover:text-blue-800"
+                          >
                             <Phone size={12} />
                           </a>
-                          <a href={`https://wa.me/${getUserPhone(task.assignedUserId)}?text=${encodeURIComponent('Task: ' + task.title)}`} target="_blank" rel="noopener noreferrer" className="text-green-600 hover:text-green-800">
+                          <a
+                            href={`https://wa.me/${getUserPhone(task.assignedUserId)}?text=${encodeURIComponent('Task: ' + task.title)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-green-600 hover:text-green-800"
+                          >
                             <MessageSquareText size={12} />
                           </a>
                         </div>
@@ -1007,11 +1586,16 @@ export function AdminTasks() {
                     </span>
                     {task.priority && (
                       <span className="text-gray-600">
-                        Priority: <span className={
-                          task.priority === 'high' ? 'text-red-500' :
-                          task.priority === 'medium' ? 'text-yellow-500' :
-                          'text-green-500'
-                        }>
+                        Priority:{' '}
+                        <span
+                          className={
+                            task.priority === 'high'
+                              ? 'text-red-500'
+                              : task.priority === 'medium'
+                              ? 'text-yellow-500'
+                              : 'text-green-500'
+                          }
+                        >
                           {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
                         </span>
                       </span>
@@ -1021,10 +1605,20 @@ export function AdminTasks() {
                         Contact: {getContactName(task.referenceContactId)}
                         {getContactPhone(task.referenceContactId) && (
                           <div className="inline-flex ml-1 gap-1">
-                            <a href={`tel:${getContactPhone(task.referenceContactId)}`} className="text-blue-600 hover:text-blue-800">
+                            <a
+                              href={`tel:${getContactPhone(task.referenceContactId)}`}
+                              className="text-blue-600 hover:text-blue-800"
+                            >
                               <Phone size={12} />
                             </a>
-                            <a href={`https://wa.me/${getContactPhone(task.referenceContactId)}?text=${encodeURIComponent('Regarding task: ' + task.title)}`} target="_blank" rel="noopener noreferrer" className="text-green-600 hover:text-green-800">
+                            <a
+                              href={`https://wa.me/${getContactPhone(
+                                task.referenceContactId
+                              )}?text=${encodeURIComponent('Regarding task: ' + task.title)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-green-600 hover:text-green-800"
+                            >
                               <MessageSquareText size={12} />
                             </a>
                           </div>
@@ -1032,9 +1626,7 @@ export function AdminTasks() {
                       </span>
                     )}
                     {task.guidelineId && (
-                      <span className="text-gray-600">
-                        Guideline: {getGuidelineTitle(task.guidelineId)}
-                      </span>
+                      <span className="text-gray-600">Guideline: {getGuidelineTitle(task.guidelineId)}</span>
                     )}
                   </div>
                 </div>

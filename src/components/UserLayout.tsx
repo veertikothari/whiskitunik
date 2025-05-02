@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { CheckSquare, Users, Menu, LogOut, Book, Search, LayoutDashboard } from 'lucide-react';
+import { CheckSquare, Users, Menu, LogOut, Book, Search, LayoutDashboard, FileText } from 'lucide-react';
 
 interface UserLayoutProps {
   children: React.ReactNode;
@@ -9,6 +9,7 @@ interface UserLayoutProps {
 const userNav = [
   { name: 'Assigned Tasks', href: '/userdashboard', icon: LayoutDashboard },
   { name: 'Tasks', href: '/usertasks', icon: CheckSquare },
+  { name: 'Templates', href: '/templates', icon: FileText },
   { name: 'Contacts', href: '/contacts', icon: Users },
   { name: 'Guidelines', href: '/guidelines', icon: Book },
   { name: 'Search', href: '/search', icon: Search },

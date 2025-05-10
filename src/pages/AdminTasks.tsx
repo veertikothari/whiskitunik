@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useRef } from 'react';
 import { Trash2, Edit, Plus, Phone, MessageSquareText, Circle, X } from 'lucide-react';
 import { db } from '../lib/firebase';
@@ -37,6 +38,13 @@ interface Guideline {
   description: string;
 }
 
+interface ParentTask {
+  id: string;
+  title: string;
+  createdAt: string;
+  createdByEmail: string;
+}
+
 interface Task {
   id: string;
   title: string;
@@ -59,6 +67,7 @@ interface Task {
   priority?: 'low' | 'medium' | 'high';
   isPrivate: boolean;
   links?: string;
+  parentTaskId?: string;
 }
 
 interface TaskFormData {
@@ -80,6 +89,7 @@ interface TaskFormData {
   priority: 'low' | 'medium' | 'high' | '';
   isPrivate: boolean;
   links: string;
+  parentTaskId: string;
 }
 
 interface NewContactForm {
@@ -102,6 +112,7 @@ export function AdminTasks() {
   const [users, setUsers] = useState<User[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [guidelines, setGuidelines] = useState<Guideline[]>([]);
+  const [parentTasks, setParentTasks] = useState<ParentTask[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isAddingTask, setIsAddingTask] = useState<boolean>(false);
   const [isEditingTask, setIsEditingTask] = useState<string | null>(null);
@@ -124,6 +135,7 @@ export function AdminTasks() {
     status: 'pending',
     isPrivate: false,
     links: '',
+    parentTaskId:'',
   });
   const [newContactForm, setNewContactForm] = useState<NewContactForm>({
     name: '',
@@ -156,13 +168,14 @@ export function AdminTasks() {
   const [prioritySearch, setPrioritySearch] = useState<string>('');
   const [guidelineSearch, setGuidelineSearch] = useState<string>('');
   const [isOverdueFilterActive, setIsOverdueFilterActive] = useState<boolean>(false);
+  const [filterParentTask, setFilterParentTask] = useState<string>('');
+  const [parentTaskFilterSearch, setParentTaskFilterSearch] = useState<string>('');
 
   const email = localStorage.getItem('userEmail');
   const today = new Date().toISOString().split('T')[0];
 
   // Dropdown refs
   const categoryDropdownRef = useRef<HTMLDivElement>(null);
-
   const [showTaskUserDropdown, setShowTaskUserDropdown] = useState(false);
   const taskUserDropdownRef = useRef<HTMLDivElement>(null);
   const [showFilterUserDropdown, setShowFilterUserDropdown] = useState(false);
@@ -175,6 +188,13 @@ export function AdminTasks() {
   const filterGuidelineDropdownRef = useRef<HTMLDivElement>(null);
   const [showGuidelineDropdown, setShowGuidelineDropdown] = useState(false);
   const guidelineDropdownRef = useRef<HTMLDivElement>(null);
+  const [parentTaskSearch, setParentTaskSearch] = useState<string>('');
+  const [showParentTaskDropdown, setShowParentTaskDropdown] = useState<boolean>(false); 
+  const [showAddParentTask, setShowAddParentTask] = useState<boolean>(false); 
+  const [newParentTaskTitle, setNewParentTaskTitle] = useState<string>(''); 
+  const [showParentTaskFilterDropdown, setShowParentTaskFilterDropdown] = useState<boolean>(false);
+  const parentTaskFilterDropdownRef = useRef<HTMLDivElement>(null);
+  const parentTaskDropdownRef = useRef<HTMLDivElement>(null); 
 
   const getCurrentDate = (): string => new Date().toISOString().split('T')[0];
   const getCurrentTime = (): string => new Date().toTimeString().slice(0, 5);
@@ -224,15 +244,15 @@ export function AdminTasks() {
     }
   };
 
-  useEffect(() => 
-    {
+  useEffect(() => {
     const fetchData = async () => {
       try {
-        const [userSnap, contactSnap, guidelineSnap, taskSnap] = await Promise.all([
+        const [userSnap, contactSnap, guidelineSnap, taskSnap, parentTaskSnap] = await Promise.all([
           getDocs(collection(db, 'users')),
           getDocs(collection(db, 'contacts')),
           getDocs(collection(db, 'guidelines')),
           getDocs(collection(db, 'tasks')),
+          getDocs(collection(db, 'parentTasks')),
         ]);
 
         setUsers(userSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
@@ -258,6 +278,7 @@ export function AdminTasks() {
           })
         );
         setGuidelines(guidelineSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guideline)));
+        setParentTasks(parentTaskSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ParentTask)));
 
         const now = Date.now();
         const validTasks: Task[] = [];
@@ -269,6 +290,7 @@ export function AdminTasks() {
             assignedUserId: taskData.assignedUserId || '',
             isPrivate: taskData.isPrivate || false,
             links: taskData.links || '',
+            parentTaskId: taskData.parentTaskId || '',
           } as Task;
         });
 
@@ -290,6 +312,7 @@ export function AdminTasks() {
                 assignedUserId: taskData.assignedUserId || '',
                 isPrivate: taskData.isPrivate || false,
                 links: taskData.links || '',
+                parentTaskId: taskData.parentTaskId || '',
               });
             }
           })
@@ -346,24 +369,6 @@ export function AdminTasks() {
         setError('Failed to load data');
         setLoading(false);
         console.error(err);
-      }
-    };
-
-    const fetchCategories = async () => {
-      try {
-        const snapshot = await getDocs(collection(db, 'contacts'));
-        const allCategories = snapshot.docs
-          .flatMap((doc) => {
-            if (!doc.exists()) return [];
-            const data = doc.data();
-            return Array.isArray(data.categories) ? data.categories : data.category ? [data.category] : [];
-          })
-          .filter((cat): cat is string => cat !== undefined && cat.trim() !== '');
-        const uniqueCategories = [...new Set(allCategories)];
-        console.log('Fetched categories:', uniqueCategories);
-        setCategories(uniqueCategories);
-      } catch (err) {
-        console.error('Fetch categories error:', err);
       }
     };
 
@@ -455,6 +460,7 @@ export function AdminTasks() {
       status: 'pending',
       isPrivate: false,
       links: '',
+      parentTaskId:'',
     });
     setNewContactForm({
       name: '',
@@ -493,6 +499,7 @@ export function AdminTasks() {
       status: task.status || 'pending',
       isPrivate: task.isPrivate || false,
       links: task.links || '',
+      parentTaskId: task.parentTaskId || '',
     });
     setTaskUserSearch('');
     setContactSearch('');
@@ -520,6 +527,7 @@ export function AdminTasks() {
       status: '',
       isPrivate: false,
       links: '',
+      parentTaskId:'',
     });
     setNewContactForm({
       name: '',
@@ -601,6 +609,29 @@ export function AdminTasks() {
     }
   };
 
+  const handleAddNewParentTask = async () => {
+    try {
+      if (!newParentTaskTitle.trim()) return;
+  
+      const newRef = doc(collection(db, 'parentTasks'));
+      const newParentTask: Omit<ParentTask, 'id'> = {
+      title: newParentTaskTitle,
+      createdAt: new Date().toISOString(),
+      createdByEmail: email || '',
+    };
+  
+      await setDoc(newRef, newParentTask);
+      const newParentTaskWithId = { ...newParentTask, id: newRef.id } as ParentTask;
+    setParentTasks(prev => [...prev, newParentTaskWithId]); // Update parentTasks state
+    setFormData(prev => ({ ...prev, parentTaskId: newRef.id }));
+    setNewParentTaskTitle('');
+    setShowAddParentTask(false);
+    setParentTaskSearch('');
+  } catch (err) {
+    console.error('Failed to add parent task', err);
+  }
+};
+
   const handleSubmit = async () => {
     try {
       if (!formData.title || !formData.dueDate || !formData.assignedUserId) return;
@@ -612,6 +643,7 @@ export function AdminTasks() {
         createdByEmail: email || '',
         isPrivate: formData.isPrivate,
         links: formData.links,
+        parentTaskId : formData.parentTaskId,
       };
 
       if (isEditingTask) {
@@ -637,13 +669,28 @@ export function AdminTasks() {
   };
 
   const getUserName = (id: string): string => {
-    const user = users.find(u => u.id === id);
-    return user?.name || 'Unknown';
+    if (!id) return 'None';
+    const userIds = id.split(',').filter(uid => uid.trim());
+    if (userIds.length === 0) return 'None';
+    const names = userIds
+      .map(uid => {
+        const user = users.find(u => u.id === uid);
+        return user?.name || 'Unknown';
+      })
+      .filter(name => name !== 'Unknown');
+    return names.length > 0 ? names.join(', ') : 'None';
   };
 
-  const getUserPhone = (id: string): string | null => {
-    const user = users.find(u => u.id === id);
-    return user?.phone || null;
+  const getUserPhone = (id: string): string[] | null => {
+    if (!id) return null;
+    const userIds = id.split(',').filter(uid => uid.trim());
+    const phones = userIds
+      .map(uid => {
+        const user = users.find(u => u.id === uid);
+        return user?.phone || null;
+      })
+      .filter(phone => phone !== null);
+    return phones.length > 0 ? phones as string[] : null;
   };
 
   const getContactDetails = (id: string): { name: string; phone: string | null } => {
@@ -664,6 +711,11 @@ export function AdminTasks() {
   const getGuidelineTitle = (id: string): string => {
     const guideline = guidelines.find(g => g.id === id);
     return guideline?.title || 'None';
+  };
+
+  const getParentTaskTitle = (id: string): string => {
+    const parentTask = parentTasks.find(t => t.id === id);
+    return parentTask?.title || 'None';
   };
 
   const getDueStatus = (dueDate: string): string => {
@@ -705,7 +757,8 @@ export function AdminTasks() {
         ) &&
         (!filterAssignedUser || task.assignedUserId === filterAssignedUser) &&
         (!filterFrequency || task.frequency === filterFrequency) &&
-        (!filterPriority || task.priority === filterPriority)
+        (!filterPriority || task.priority === filterPriority) &&
+        (!filterParentTask || task.parentTaskId === filterParentTask)
       );
     })
     .sort((a, b) => {
@@ -751,11 +804,19 @@ export function AdminTasks() {
   };
 
   const handleTaskUserSelect = (userId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      assignedUserId: userId,
-    }));
-    setShowTaskUserDropdown(false);
+    setFormData(prev => {
+      const currentIds = prev.assignedUserId ? prev.assignedUserId.split(',').filter(id => id.trim()) : [];
+      let newIds: string[];
+      if (currentIds.includes(userId)) {
+        newIds = currentIds.filter(id => id !== userId);
+      } else {
+        newIds = [...currentIds, userId];
+      }
+      return {
+        ...prev,
+        assignedUserId: newIds.join(','),
+      };
+    });
     setTaskUserSearch('');
   };
 
@@ -810,10 +871,12 @@ export function AdminTasks() {
     setFilterAssignedUser('');
     setFilterFrequency('');
     setFilterPriority('');
+    setFilterParentTask('');
     setSortField('dueDate');
     setSortDirection('asc');
     setFilterUserSearch('');
     setIsOverdueFilterActive(false);
+    setParentTaskFilterSearch('');
   };
 
   useEffect(() => {
@@ -836,6 +899,12 @@ export function AdminTasks() {
       if (categoryDropdownRef.current && !categoryDropdownRef.current.contains(event.target as Node)) {
         setIsCategoryDropdownOpen(false);
       }
+      if (parentTaskDropdownRef.current && !parentTaskDropdownRef.current.contains(event.target as Node)) {
+        setShowParentTaskDropdown(false);
+      }
+      if (parentTaskFilterDropdownRef.current && !parentTaskFilterDropdownRef.current.contains(event.target as Node)) {
+      setShowParentTaskFilterDropdown(false);
+    }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -927,6 +996,54 @@ export function AdminTasks() {
               <option value="low">Low</option>
             </select>
           </div>
+          <div ref={parentTaskFilterDropdownRef}>
+          <label className="block text-sm text-gray-700">Parent Task</label>
+          <div className="relative">
+            <input
+              type="text"
+              value={filterParentTask ? getParentTaskTitle(filterParentTask) : parentTaskFilterSearch}
+              onChange={(e) => setParentTaskFilterSearch(e.target.value)}
+              onFocus={() => setShowParentTaskFilterDropdown(true)}
+              placeholder="Search parent tasks..."
+              className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+            />
+            {showParentTaskFilterDropdown && (
+              <div className="absolute z-10 w-full mt-1 bg-white border rounded shadow-lg max-h-60 overflow-auto">
+                {parentTasks
+                  .filter(pt =>
+                    pt.title.toLowerCase().includes(parentTaskFilterSearch.toLowerCase())
+                  )
+                  .map(pt => (
+                    <div
+                      key={pt.id}
+                      className={`p-2 hover:bg-gray-100 cursor-pointer ${
+                        filterParentTask === pt.id ? 'bg-blue-100' : ''
+                      }`}
+                      onClick={() => {
+                        setFilterParentTask(pt.id);
+                        setShowParentTaskFilterDropdown(false);
+                        setParentTaskFilterSearch('');
+                      }}
+                    >
+                      {pt.title}
+                    </div>
+                  ))}
+                <div
+                  className={`p-2 hover:bg-gray-100 cursor-pointer ${
+                    filterParentTask === '' ? 'bg-blue-100' : ''
+                  }`}
+                  onClick={() => {
+                    setFilterParentTask('');
+                    setShowParentTaskFilterDropdown(false);
+                    setParentTaskFilterSearch('');
+                  }}
+                >
+                  All Parent Tasks
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
         </div>
         <div className="mt-4 flex flex-wrap justify-between gap-2">
           <div className="flex flex-wrap gap-2">
@@ -953,6 +1070,12 @@ export function AdminTasks() {
               className={`px-3 py-1 rounded ${sortField === 'priority' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
             >
               Priority {sortField === 'priority' && (sortDirection === 'asc' ? '↑' : '↓')}
+            </button>
+            <button
+              onClick={() => toggleSort('parentTask')}
+              className={`px-3 py-1 rounded ${sortField === 'parentTask' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+            >
+              Parent Task {sortField === 'parentTask' && (sortDirection === 'asc' ? '↑' : '↓')}
             </button>
             <button
               onClick={handleOverdueFilter}
@@ -1015,6 +1138,105 @@ export function AdminTasks() {
               className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
             />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div ref={parentTaskDropdownRef}>
+                <label className="block text-sm sm:text-base md:text-lg text-gray-700">Parent Task</label>
+                <div className="relative">
+                  <div className="w-full p-2 border rounded focus-within:ring-1 focus-within:ring-blue-500 text-sm sm:text-base md:text-lg">
+                    <div className="flex items-center gap-1">
+                      {formData.parentTaskId ? (
+                        <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full flex items-center gap-1 text-xs sm:text-sm">
+                          {getParentTaskTitle(formData.parentTaskId)}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormData(prev => ({ ...prev, parentTaskId: '' }));
+                              setParentTaskSearch('');
+                            }}
+                            className="text-blue-500 hover:text-blue-700"
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      ) : null}
+                      <input
+                        type="text"
+                        value={parentTaskSearch}
+                        onChange={(e) => setParentTaskSearch(e.target.value)}
+                        onFocus={() => setShowParentTaskDropdown(true)}
+                        placeholder={formData.parentTaskId ? '' : 'Search or select parent task...'}
+                        className="flex-1 border-none focus:outline-none text-sm sm:text-base md:text-lg bg-transparent"
+                      />
+                    </div>
+                  </div>
+                  {showParentTaskDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border rounded shadow-lg max-h-40 overflow-y-auto">
+                      {tasks
+                        .filter(task =>
+                          task.id !== (isEditingTask || '') &&
+                          task.title.toLowerCase().includes(parentTaskSearch.toLowerCase()) &&
+                          task.id !== formData.parentTaskId // Exclude the already selected task
+                        )
+                        .map(task => (
+                          <div
+                            key={task.id}
+                            className="p-2 hover:bg-gray-100 cursor-pointer"
+                            onClick={() => {
+                              setFormData(prev => ({ ...prev, parentTaskId: task.id }));
+                              setParentTaskSearch('');
+                              setShowParentTaskDropdown(false);
+                            }}
+                          >
+                            {task.title}
+                          </div>
+                        ))}
+                      {tasks.filter(task =>
+                        task.id !== (isEditingTask || '') &&
+                        task.title.toLowerCase().includes(parentTaskSearch.toLowerCase()) &&
+                        task.id !== formData.parentTaskId
+                      ).length === 0 && (
+                        <div className="p-2 text-gray-500">No tasks found</div>
+                      )}
+                      <div
+                        className="p-2 hover:bg-gray-100 cursor-pointer text-blue-600"
+                        onClick={() => {
+                          setShowAddParentTask(true);
+                          setShowParentTaskDropdown(false);
+                        }}
+                      >
+                        + Add New Parent Task
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {showAddParentTask && (
+                  <div className="mt-2 p-2 bg-white border rounded shadow-lg">
+                    <input
+                      type="text"
+                      placeholder="Enter new parent task title"
+                      value={newParentTaskTitle}
+                      onChange={(e) => setNewParentTaskTitle(e.target.value)}
+                      className="w-full border px-2 py-1 rounded mb-2 text-sm sm:text-base md:text-lg"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddNewParentTask}
+                      className="px-2 py-1 bg-blue-600 text-white rounded mr-2 text-sm sm:text-base"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddParentTask(false);
+                        setNewParentTaskTitle('');
+                      }}
+                      className="px-2 py-1 border rounded text-sm sm:text-base"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
               <div>
                 <label className="block text-sm sm:text-base md:text-lg text-gray-700">Due Date</label>
                 <input
@@ -1119,40 +1341,59 @@ export function AdminTasks() {
               <div ref={taskUserDropdownRef}>
                 <label className="block text-sm sm:text-base md:text-lg text-gray-700">Assign to</label>
                 <div className="relative">
-                  <input
-                    type="text"
-                    value={formData.assignedUserId ? getUserName(formData.assignedUserId) : taskUserSearch}
-                    onChange={(e) => setTaskUserSearch(e.target.value)}
-                    onFocus={() => setShowTaskUserDropdown(true)}
-                    placeholder="Search users..."
-                    className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
-                  />
+                  <div className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg">
+                    <div className="flex flex-wrap gap-1 min-h-[1.5rem]">
+                      {formData.assignedUserId
+                        ?.split(',')
+                        .filter(id => id.trim())
+                        .map(userId => {
+                          const user = users.find(u => u.id === userId);
+                          return user ? (
+                            <span
+                              key={userId}
+                              className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full flex items-center gap-1 text-xs sm:text-sm"
+                            >
+                              {user.name}
+                              <button
+                                type="button"
+                                onClick={() => handleTaskUserSelect(userId)}
+                                className="text-blue-500 hover:text-blue-700"
+                              >
+                                <X size={12} />
+                              </button>
+                            </span>
+                          ) : null;
+                        })}
+                      <input
+                        type="text"
+                        value={taskUserSearch}
+                        onChange={(e) => setTaskUserSearch(e.target.value)}
+                        onFocus={() => setShowTaskUserDropdown(true)}
+                        placeholder={formData.assignedUserId ? '' : 'Search users...'}
+                        className="flex-1 border-none focus:outline-none text-sm sm:text-base md:text-lg bg-transparent"
+                      />
+                    </div>
+                  </div>
                   {showTaskUserDropdown && (
                     <div className="absolute z-10 w-full mt-1 bg-white border rounded shadow-lg max-h-60 overflow-auto">
                       {users
                         .filter(user =>
-                          user.name.toLowerCase().includes(taskUserSearch.toLowerCase()) ||
-                          user.email.toLowerCase().includes(taskUserSearch.toLowerCase())
+                          (user.name.toLowerCase().includes(taskUserSearch.toLowerCase()) ||
+                           user.email.toLowerCase().includes(taskUserSearch.toLowerCase())) &&
+                          !formData.assignedUserId?.split(',').includes(user.id)
                         )
                         .map(user => (
                           <div
                             key={user.id}
-                            className={`p-2 hover:bg-gray-100 cursor-pointer ${
-                              formData.assignedUserId === user.id ? 'bg-blue-100' : ''
-                            }`}
+                            className="p-2 hover:bg-gray-100 cursor-pointer"
                             onClick={() => handleTaskUserSelect(user.id)}
                           >
                             {user.name} ({user.email})
                           </div>
                         ))}
-                      <div
-                        className={`p-2 hover:bg-gray-100 cursor-pointer ${
-                          formData.assignedUserId === '' ? 'bg-blue-100' : ''
-                        }`}
-                        onClick={() => handleTaskUserSelect('')}
-                      >
-                        None
-                      </div>
+                      {users.length === 0 && (
+                        <div className="p-2 text-gray-500">No users found</div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1528,7 +1769,7 @@ export function AdminTasks() {
                         task.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-800'
                       }`}
                     >
-                      {task.title}
+                      {task.title} {task.parentTaskId ? `(${getParentTaskTitle(task.parentTaskId)})` : ''}
                     </h3>
                   </div>
                   {task.description && (
@@ -1567,20 +1808,24 @@ export function AdminTasks() {
                       Assigned: {task.assignedUserId ? getUserName(task.assignedUserId) : 'None'}
                       {task.assignedUserId && getUserPhone(task.assignedUserId) && (
                         <div className="inline-flex ml-1 gap-1">
-                          <a
-                            href={`tel:${getUserPhone(task.assignedUserId)}`}
-                            className="text-blue-600 hover:text-blue-800"
-                          >
-                            <Phone size={12} />
-                          </a>
-                          <a
-                            href={`https://wa.me/${getUserPhone(task.assignedUserId)}?text=${encodeURIComponent('Task: ' + task.title)}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-green-600 hover:text-green-800"
-                          >
-                            <MessageSquareText size={12} />
-                          </a>
+                          {getUserPhone(task.assignedUserId)!.map((phone, index) => (
+                            <span key={index} className="inline-flex gap-1">
+                              <a
+                                href={`tel:${phone}`}
+                                className="text-blue-600 hover:text-blue-800"
+                              >
+                                <Phone size={12} />
+                              </a>
+                              <a
+                                href={`https://wa.me/${phone}?text=${encodeURIComponent('Task: ' + task.title)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-green-600 hover:text-green-800"
+                              >
+                                <MessageSquareText size={12} />
+                              </a>
+                            </span>
+                          ))}
                         </div>
                       )}
                     </span>

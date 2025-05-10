@@ -14,7 +14,8 @@ import {
 
 interface TimeLogEntry {
   date: string;
-  hours: number;
+  hours?: number; // Optional for older data
+  minutes?: number; // Optional for newer data
   userId: string;
 }
 
@@ -31,9 +32,9 @@ interface User {
 interface UserEfficiency {
   userId: string;
   name: string;
-  totalMinutes: number; // Changed from totalHours
+  totalMinutes: number;
   taskCount: number;
-  avgMinutesPerTask: number; // Changed from avgHoursPerTask
+  avgMinutesPerTask: number;
 }
 
 export function TimeLog() {
@@ -43,48 +44,64 @@ export function TimeLog() {
 
   useEffect(() => {
     const fetchEfficiencyData = async () => {
-      // Fetch users to map IDs to names
-      const usersSnap = await getDocs(collection(db, 'users'));
-      const usersList = usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
-      setUsers(usersList);
+      try {
+        // Fetch users to map IDs to names
+        const usersSnap = await getDocs(collection(db, 'users'));
+        const usersList = usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
+        setUsers(usersList);
 
-      const taskSnap = await getDocs(collection(db, 'tasks'));
+        // Fetch tasks and their time logs
+        const taskSnap = await getDocs(collection(db, 'tasks'));
 
-      const efficiencyMap: { [userId: string]: { totalMinutes: number; taskCount: number } } = {};
+        const efficiencyMap: { [userId: string]: { totalMinutes: number; taskCount: number } } = {};
 
-      taskSnap.docs.forEach(docSnap => {
-        const task = docSnap.data() as Task;
-        const uniqueUsers = new Set<string>();
+        taskSnap.docs.forEach(docSnap => {
+          const task = docSnap.data() as Task;
+          const uniqueUsers = new Set<string>();
 
-        task.timeLogs?.forEach(log => {
-          const userId = log.userId;
-          uniqueUsers.add(userId);
+          task.timeLogs?.forEach(log => {
+            const userId = log.userId;
+            if (!userId) return; // Skip logs without userId
 
-          if (!efficiencyMap[userId]) {
-            efficiencyMap[userId] = { totalMinutes: 0, taskCount: 0 };
-          }
+            // Determine time in minutes (handle hours or minutes fields)
+            let timeInMinutes = 0;
+            if (typeof log.hours === 'number' && !isNaN(log.hours)) {
+              timeInMinutes = log.hours * 60; // Convert hours to minutes
+            } else if (typeof log.minutes === 'number' && !isNaN(log.minutes)) {
+              timeInMinutes = log.minutes; // Use minutes directly
+            } // Else timeInMinutes remains 0 for invalid data
 
-          efficiencyMap[userId].totalMinutes += log.hours * 60; // Convert hours to minutes
+            uniqueUsers.add(userId);
+
+            if (!efficiencyMap[userId]) {
+              efficiencyMap[userId] = { totalMinutes: 0, taskCount: 0 };
+            }
+
+            efficiencyMap[userId].totalMinutes += timeInMinutes;
+          });
+
+          uniqueUsers.forEach(userId => {
+            efficiencyMap[userId].taskCount += 1;
+          });
         });
 
-        uniqueUsers.forEach(userId => {
-          efficiencyMap[userId].taskCount += 1;
+        const result: UserEfficiency[] = Object.entries(efficiencyMap).map(([userId, data]) => {
+          const user = usersList.find(u => u.id === userId);
+          return {
+            userId,
+            name: user ? user.name : userId,
+            totalMinutes: parseFloat(data.totalMinutes.toFixed(2)),
+            taskCount: data.taskCount,
+            avgMinutesPerTask: data.taskCount > 0 ? parseFloat((data.totalMinutes / data.taskCount).toFixed(2)) : 0,
+          };
         });
-      });
 
-      const result: UserEfficiency[] = Object.entries(efficiencyMap).map(([userId, data]) => {
-        const user = usersList.find(u => u.id === userId);
-        return {
-          userId,
-          name: user ? user.name : userId,
-          totalMinutes: parseFloat(data.totalMinutes.toFixed(2)), // Changed from totalHours
-          taskCount: data.taskCount,
-          avgMinutesPerTask: data.taskCount > 0 ? parseFloat((data.totalMinutes / data.taskCount).toFixed(2)) : 0, // Changed from avgHoursPerTask
-        };
-      });
-
-      setEfficiencyData(result);
-      setLoading(false);
+        setEfficiencyData(result);
+      } catch (err) {
+        console.error('Error fetching efficiency data:', err);
+      } finally {
+        setLoading(false);
+      }
     };
 
     fetchEfficiencyData();
@@ -108,10 +125,10 @@ export function TimeLog() {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis />
-                <Tooltip />
+                <Tooltip formatter={(value: number) => [`${value} minutes`, undefined]} />
                 <Legend />
-                <Bar dataKey="totalMinutes" fill="#3b82f6" name="Total Minutes" /> {/* Changed from totalHours */}
-                <Bar dataKey="avgMinutesPerTask" fill="#10b981" name="Avg Minutes/Task" /> {/* Changed from avgHoursPerTask */}
+                <Bar dataKey="totalMinutes" fill="#3b82f6" name="Total Minutes" />
+                <Bar dataKey="avgMinutesPerTask" fill="#10b981" name="Avg Minutes/Task" />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -122,18 +139,18 @@ export function TimeLog() {
               <thead>
                 <tr className="bg-gray-100 text-left">
                   <th className="p-3 border">User Name</th>
-                  <th className="p-3 border">Total Minutes</th> {/* Changed from Total Hours */}
+                  <th className="p-3 border">Total Minutes</th>
                   <th className="p-3 border">Tasks Involved</th>
-                  <th className="p-3 border">Avg Minutes / Task</th> {/* Changed from Avg Hours / Task */}
+                  <th className="p-3 border">Avg Minutes / Task</th>
                 </tr>
               </thead>
               <tbody>
                 {efficiencyData.map(user => (
                   <tr key={user.userId} className="hover:bg-gray-50">
                     <td className="p-3 border">{user.name}</td>
-                    <td className="p-3 border">{user.totalMinutes}</td> {/* Changed from totalHours */}
+                    <td className="p-3 border">{user.totalMinutes}</td>
                     <td className="p-3 border">{user.taskCount}</td>
-                    <td className="p-3 border">{user.avgMinutesPerTask}</td> {/* Changed from avgHoursPerTask */}
+                    <td className="p-3 border">{user.avgMinutesPerTask}</td>
                   </tr>
                 ))}
               </tbody>

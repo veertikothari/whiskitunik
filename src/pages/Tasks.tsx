@@ -224,8 +224,7 @@ export function Tasks() {
     }
   };
 
-  useEffect(() => 
-    {
+  useEffect(() => {
     const fetchData = async () => {
       try {
         const [userSnap, contactSnap, guidelineSnap, taskSnap] = await Promise.all([
@@ -637,13 +636,28 @@ export function Tasks() {
   };
 
   const getUserName = (id: string): string => {
-    const user = users.find(u => u.id === id);
-    return user?.name || 'Unknown';
+    if (!id) return 'None';
+    const userIds = id.split(',').filter(uid => uid.trim());
+    if (userIds.length === 0) return 'None';
+    const names = userIds
+      .map(uid => {
+        const user = users.find(u => u.id === uid);
+        return user?.name || 'Unknown';
+      })
+      .filter(name => name !== 'Unknown');
+    return names.length > 0 ? names.join(', ') : 'None';
   };
 
-  const getUserPhone = (id: string): string | null => {
-    const user = users.find(u => u.id === id);
-    return user?.phone || null;
+  const getUserPhone = (id: string): string[] | null => {
+    if (!id) return null;
+    const userIds = id.split(',').filter(uid => uid.trim());
+    const phones = userIds
+      .map(uid => {
+        const user = users.find(u => u.id === uid);
+        return user?.phone || null;
+      })
+      .filter(phone => phone !== null);
+    return phones.length > 0 ? phones as string[] : null;
   };
 
   const getContactDetails = (id: string): { name: string; phone: string | null } => {
@@ -690,6 +704,7 @@ export function Tasks() {
   };
 
   const filteredAndSortedTasks = tasks
+
     .filter(task => {
       const isAdminTask = task.createdByEmail === email;
       const today = new Date();
@@ -751,12 +766,23 @@ export function Tasks() {
   };
 
   const handleTaskUserSelect = (userId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      assignedUserId: userId,
-    }));
-    setShowTaskUserDropdown(false);
+    setFormData(prev => {
+      const currentIds = prev.assignedUserId ? prev.assignedUserId.split(',').filter(id => id.trim()) : [];
+      let newIds: string[];
+      if (currentIds.includes(userId)) {
+        // Remove user if already selected
+        newIds = currentIds.filter(id => id !== userId);
+      } else {
+        // Add user to the list
+        newIds = [...currentIds, userId];
+      }
+      return {
+        ...prev,
+        assignedUserId: newIds.join(','),
+      };
+    });
     setTaskUserSearch('');
+    // Keep dropdown open to allow multiple selections
   };
 
   const handleFilterUserSelect = (userId: string) => {
@@ -769,6 +795,7 @@ export function Tasks() {
     setFormData(prev => ({ ...prev, referenceContactId: contactId }));
     setShowContactDropdown(false);
     setContactSearch('');
+打击
   };
 
   const handleGuidelineSelect = (guidelineId: string) => {
@@ -1119,40 +1146,59 @@ export function Tasks() {
               <div ref={taskUserDropdownRef}>
                 <label className="block text-sm sm:text-base md:text-lg text-gray-700">Assign to</label>
                 <div className="relative">
-                  <input
-                    type="text"
-                    value={formData.assignedUserId ? getUserName(formData.assignedUserId) : taskUserSearch}
-                    onChange={(e) => setTaskUserSearch(e.target.value)}
-                    onFocus={() => setShowTaskUserDropdown(true)}
-                    placeholder="Search users..."
-                    className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg"
-                  />
+                  <div className="w-full p-2 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm sm:text-base md:text-lg">
+                    <div className="flex flex-wrap gap-1 min-h-[1.5rem]">
+                      {formData.assignedUserId
+                        ?.split(',')
+                        .filter(id => id.trim())
+                        .map(userId => {
+                          const user = users.find(u => u.id === userId);
+                          return user ? (
+                            <span
+                              key={userId}
+                              className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full flex items-center gap-1 text-xs sm:text-sm"
+                            >
+                              {user.name}
+                              <button
+                                type="button"
+                                onClick={() => handleTaskUserSelect(userId)}
+                                className="text-blue-500 hover:text-blue-700"
+                              >
+                                <X size={12} />
+                              </button>
+                            </span>
+                          ) : null;
+                        })}
+                      <input
+                        type="text"
+                        value={taskUserSearch}
+                        onChange={(e) => setTaskUserSearch(e.target.value)}
+                        onFocus={() => setShowTaskUserDropdown(true)}
+                        placeholder={formData.assignedUserId ? '' : 'Search users...'}
+                        className="flex-1 border-none focus:outline-none text-sm sm:text-base md:text-lg bg-transparent"
+                      />
+                    </div>
+                  </div>
                   {showTaskUserDropdown && (
                     <div className="absolute z-10 w-full mt-1 bg-white border rounded shadow-lg max-h-60 overflow-auto">
                       {users
                         .filter(user =>
-                          user.name.toLowerCase().includes(taskUserSearch.toLowerCase()) ||
-                          user.email.toLowerCase().includes(taskUserSearch.toLowerCase())
+                          (user.name.toLowerCase().includes(taskUserSearch.toLowerCase()) ||
+                           user.email.toLowerCase().includes(taskUserSearch.toLowerCase())) &&
+                          !formData.assignedUserId?.split(',').includes(user.id)
                         )
                         .map(user => (
                           <div
                             key={user.id}
-                            className={`p-2 hover:bg-gray-100 cursor-pointer ${
-                              formData.assignedUserId === user.id ? 'bg-blue-100' : ''
-                            }`}
+                            className="p-2 hover:bg-gray-100 cursor-pointer"
                             onClick={() => handleTaskUserSelect(user.id)}
                           >
                             {user.name} ({user.email})
                           </div>
                         ))}
-                      <div
-                        className={`p-2 hover:bg-gray-100 cursor-pointer ${
-                          formData.assignedUserId === '' ? 'bg-blue-100' : ''
-                        }`}
-                        onClick={() => handleTaskUserSelect('')}
-                      >
-                        None
-                      </div>
+                      {users.length === 0 && (
+                        <div className="p-2 text-gray-500">No users found</div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1567,20 +1613,24 @@ export function Tasks() {
                       Assigned: {task.assignedUserId ? getUserName(task.assignedUserId) : 'None'}
                       {task.assignedUserId && getUserPhone(task.assignedUserId) && (
                         <div className="inline-flex ml-1 gap-1">
-                          <a
-                            href={`tel:${getUserPhone(task.assignedUserId)}`}
-                            className="text-blue-600 hover:text-blue-800"
-                          >
-                            <Phone size={12} />
-                          </a>
-                          <a
-                            href={`https://wa.me/${getUserPhone(task.assignedUserId)}?text=${encodeURIComponent('Task: ' + task.title)}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-green-600 hover:text-green-800"
-                          >
-                            <MessageSquareText size={12} />
-                          </a>
+                          {getUserPhone(task.assignedUserId)!.map((phone, index) => (
+                            <span key={index} className="inline-flex gap-1">
+                              <a
+                                href={`tel:${phone}`}
+                                className="text-blue-600 hover:text-blue-800"
+                              >
+                                <Phone size={12} />
+                              </a>
+                              <a
+                                href={`https://wa.me/${phone}?text=${encodeURIComponent('Task: ' + task.title)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-green-600 hover:text-green-800"
+                              >
+                                <MessageSquareText size={12} />
+                              </a>
+                            </span>
+                          ))}
                         </div>
                       )}
                     </span>
